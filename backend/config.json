@@ -1,3 +1,4 @@
 {
-    "mc_servers_path": "/mnt/c/Users/bobby/Desktop/mc_servers"
+    "servers_dir": "/mnt/c/Users/bobby/Desktop/mc_servers",
+    "configs_dir": "/mnt/c/Users/bobby/Documents/AI/backend/server_configs"
 }

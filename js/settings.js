@@ -3,6 +3,7 @@ const API_URL = 'http://127.0.0.1:5000';
 document.addEventListener('DOMContentLoaded', () => {
     const settingsModal = document.getElementById('settingsModal');
     const serversDirInput = document.getElementById('servers-dir-input');
+    const configsDirInput = document.getElementById('configs-dir-input');
     const saveSettingsBtn = document.getElementById('save-settings-btn');
     const screenList = document.getElementById('screen-list');
     const terminateAllScreensBtn = document.getElementById('terminate-all-screens-btn');
@@ -13,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const config = await response.json();
             if (response.ok) {
                 serversDirInput.value = config.servers_dir;
+                configsDirInput.value = config.configs_dir;
             } else {
                 console.error('Failed to fetch config:', config.error);
             }
@@ -26,7 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`${API_URL}/api/config`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ servers_dir: serversDirInput.value })
+                body: JSON.stringify({ 
+                    servers_dir: serversDirInput.value,
+                    configs_dir: configsDirInput.value 
+                })
             });
             const result = await response.json();
             if (response.ok) {

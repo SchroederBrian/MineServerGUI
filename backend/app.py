@@ -28,15 +28,25 @@ def load_config():
     """Loads the configuration from config.json."""
     if not os.path.exists(CONFIG_FILE):
         # Create a default config if it doesn't exist
-        default_config = {'mc_servers_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers')}
+        default_config = {
+            'servers_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers'),
+            'configs_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+        }
         save_config(default_config)
         return default_config
     try:
         with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
+            # Add default for configs_dir if it's missing for backward compatibility
+            config_data = json.load(f)
+            if 'configs_dir' not in config_data:
+                config_data['configs_dir'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+            return config_data
     except (json.JSONDecodeError, IOError) as e:
         print(f"Error reading config file {CONFIG_FILE}: {e}. Using default.")
-        return {'mc_servers_path': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers')}
+        return {
+            'servers_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers'),
+            'configs_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+        }
 
 def save_config(config_data):
     """Saves the configuration to config.json."""
@@ -45,7 +55,8 @@ def save_config(config_data):
 
 # Load config on startup
 config = load_config()
-SERVERS_DIR = config['mc_servers_path']
+SERVERS_DIR = config['servers_dir']
+CONFIGS_DIR = config['configs_dir']
 
 # --- Global State ---
 # This dictionary will hold the running server subprocesses
@@ -263,6 +274,9 @@ def handle_servers():
             write_server_metadata(server_path, {'version': version, 'server_type': server_type})
             
             # --- Add default start script ---
+            # Ensure the server-specific config directory exists
+            server_config_dir = get_server_config_dir(server_name)
+            os.makedirs(server_config_dir, exist_ok=True)
             start_script_path = get_start_script_path(server_name)
             # This is the command that will be run. The user has full control over it.
             # We no longer hardcode finding java or the jar name.
@@ -465,11 +479,14 @@ def handle_file_content(server_name):
 
 def get_install_script_path(server_name):
     """Returns the path to the install_script.json for a given server."""
-    return os.path.join(SERVERS_DIR, server_name, 'install_script.json')
+    server_config_dir = os.path.join(CONFIGS_DIR, server_name)
+    return os.path.join(server_config_dir, 'install_script.json')
 
 @app.route('/api/servers/<server_name>/install-script', methods=['GET', 'POST'])
 def handle_install_script(server_name):
     script_path = get_install_script_path(server_name)
+    # Ensure the directory exists before trying to write to it
+    os.makedirs(os.path.dirname(script_path), exist_ok=True)
     if request.method == 'POST':
         data = request.get_json()
         if 'commands' not in data or not isinstance(data['commands'], list):
@@ -487,11 +504,14 @@ def handle_install_script(server_name):
         return jsonify({"commands": []})
 
 def get_start_script_path(server_name):
-    return os.path.join(SERVERS_DIR, server_name, 'start_script.json')
+    server_config_dir = os.path.join(CONFIGS_DIR, server_name)
+    return os.path.join(server_config_dir, 'start_script.json')
 
 @app.route('/api/servers/<server_name>/start-script', methods=['GET', 'POST'])
 def handle_start_script(server_name):
     script_path = get_start_script_path(server_name)
+    # Ensure the directory exists before trying to write to it
+    os.makedirs(os.path.dirname(script_path), exist_ok=True)
     if request.method == 'POST':
         data = request.get_json()
         if 'commands' not in data or not isinstance(data['commands'], list):
@@ -674,13 +694,13 @@ def handle_settings():
     global SERVERS_DIR, config
     if request.method == 'POST':
         data = request.get_json()
-        new_path = data.get('mc_servers_path')
+        new_path = data.get('servers_dir')
 
         if not new_path or not os.path.isdir(new_path):
             return jsonify({"error": "Invalid or non-existent directory provided."}), 400
 
         # Update config and save
-        config['mc_servers_path'] = new_path
+        config['servers_dir'] = new_path
         save_config(config)
 
         # Update the global variable for the current session
@@ -868,6 +888,10 @@ def delete_server(server_name):
     
     try:
         shutil.rmtree(server_path)
+        # Also delete the server's config directory
+        server_config_path = os.path.join(CONFIGS_DIR, server_name)
+        if os.path.isdir(server_config_path):
+            shutil.rmtree(server_config_path)
         return jsonify({"message": f"Server '{server_name}' deleted successfully."}), 200
     except Exception as e:
         return jsonify({"error": f"Failed to delete server directory: {e}"}), 500
@@ -1120,23 +1144,73 @@ def get_config():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/config', methods=['POST'])
-def save_config():
-    try:
-        data = request.get_json()
-        if 'servers_dir' not in data:
-            return jsonify({'error': 'servers_dir is required.'}), 400
-        
-        # You might want to add validation here to ensure the path is valid
-        
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
+def save_config_endpoint():
+    global SERVERS_DIR, CONFIGS_DIR
+
+    old_config = config.copy()
+    new_config_data = request.get_json()
+
+    old_servers_dir = old_config.get('servers_dir')
+    new_servers_dir = new_config_data.get('servers_dir')
+    
+    old_configs_dir = old_config.get('configs_dir')
+    new_configs_dir = new_config_data.get('configs_dir')
+
+    # --- Handle Servers Directory Change ---
+    if new_servers_dir and new_servers_dir != old_servers_dir:
+        try:
+            if not os.path.exists(new_servers_dir):
+                os.makedirs(new_servers_dir)
             
-        global SERVERS_DIR
-        SERVERS_DIR = data['servers_dir']
+            if os.path.isdir(old_servers_dir):
+                print(f"Moving server files from {old_servers_dir} to {new_servers_dir}")
+                for item in os.listdir(old_servers_dir):
+                    s = os.path.join(old_servers_dir, item)
+                    d = os.path.join(new_servers_dir, item)
+                    if os.path.isdir(s):
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(s, d)
+                shutil.rmtree(old_servers_dir)
+            
+            SERVERS_DIR = new_servers_dir
+            config['servers_dir'] = new_servers_dir
+        except Exception as e:
+            # Revert on failure
+            config['servers_dir'] = old_servers_dir
+            return jsonify({"error": f"Failed to move servers directory: {e}"}), 500
         
-        return jsonify({'message': 'Settings saved successfully.'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    # --- Handle Configs Directory Change ---
+    if new_configs_dir and new_configs_dir != old_configs_dir:
+        try:
+            if not os.path.exists(new_configs_dir):
+                os.makedirs(new_configs_dir)
+            
+            if os.path.isdir(old_configs_dir):
+                print(f"Moving config files from {old_configs_dir} to {new_configs_dir}")
+                for item in os.listdir(old_configs_dir):
+                    s = os.path.join(old_configs_dir, item)
+                    d = os.path.join(new_configs_dir, item)
+                    if os.path.isdir(s):
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(s, d)
+                shutil.rmtree(old_configs_dir)
+
+            CONFIGS_DIR = new_configs_dir
+            config['configs_dir'] = new_configs_dir
+        except Exception as e:
+            # Revert this part of the change if it fails
+            config['configs_dir'] = old_configs_dir
+            # Also revert the servers dir change if it happened in the same request
+            config['servers_dir'] = old_servers_dir
+            return jsonify({"error": f"Failed to move config directory: {e}"}), 500
+
+    save_config(config)
+    # Update global vars after successful save
+    SERVERS_DIR = config['servers_dir']
+    CONFIGS_DIR = config['configs_dir']
+    return jsonify({'message': 'Settings saved successfully.'})
 
 @app.route('/api/minecraft/versions', methods=['GET'])
 def get_minecraft_versions():
@@ -1151,6 +1225,8 @@ def get_minecraft_versions():
         return jsonify(versions)
     except requests.RequestException as e:
         return jsonify({'error': f"Failed to fetch version manifest: {e}"}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/loaders/<loader>/versions')
 def get_loader_versions(loader):
@@ -1305,5 +1381,45 @@ def upload_files(server_name):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def get_server_config_dir(server_name):
+    """Helper to get the config directory for a specific server."""
+    return os.path.join(CONFIGS_DIR, server_name)
+
+def migrate_scripts_to_configs_dir():
+    """
+    One-time migration to move scripts from inside server folders
+    to the centralized configs directory.
+    """
+    if not os.path.isdir(SERVERS_DIR):
+        print("Migration skipped: Servers directory does not exist.")
+        return
+
+    print("Checking for script migration...")
+    for server_name in os.listdir(SERVERS_DIR):
+        server_path = os.path.join(SERVERS_DIR, server_name)
+        if os.path.isdir(server_path):
+            old_start_script = os.path.join(server_path, 'start_script.json')
+            old_install_script = os.path.join(server_path, 'install_script.json')
+
+            if os.path.exists(old_start_script) or os.path.exists(old_install_script):
+                print(f"Found old scripts for server '{server_name}'. Migrating...")
+                new_config_dir = get_server_config_dir(server_name)
+                os.makedirs(new_config_dir, exist_ok=True)
+                
+                if os.path.exists(old_start_script):
+                    shutil.move(old_start_script, os.path.join(new_config_dir, 'start_script.json'))
+                    print(f" - Moved start_script.json for {server_name}")
+                if os.path.exists(old_install_script):
+                    shutil.move(old_install_script, os.path.join(new_config_dir, 'install_script.json'))
+                    print(f" - Moved install_script.json for {server_name}")
+    
+    # Mark migration as complete
+    config['migrated_scripts_to_config_dir'] = True
+    save_config(config)
+    print("Script migration check complete.")
+
+
 if __name__ == '__main__':
+    if not config.get('migrated_scripts_to_config_dir'):
+        migrate_scripts_to_configs_dir()
     app.run(debug=True, port=5000) 
