@@ -24,6 +24,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const saveConfig = async () => {
+        const spinner = saveSettingsBtn.querySelector('.spinner-border');
+        const buttonText = saveSettingsBtn.querySelector('.button-text');
+        
+        // Show spinner and disable button
+        spinner.style.display = 'inline-block';
+        buttonText.textContent = 'Saving...';
+        saveSettingsBtn.disabled = true;
+
         try {
             const response = await fetch(`${API_URL}/api/config`, {
                 method: 'POST',
@@ -42,6 +50,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             Swal.fire('Error', `Error saving settings: ${error}`, 'error');
+        } finally {
+            // Hide spinner and enable button
+            spinner.style.display = 'none';
+            buttonText.textContent = 'Save Settings';
+            saveSettingsBtn.disabled = false;
         }
     };
 

@@ -14,7 +14,7 @@
 - [X] add the ability to upload files to the currently open folder by dragging and dropping them jsut in the web browser file explorer window tab or by klicking a uplaod file button and selecting the file manualy
 - [X] add a folder selector like the mc_servers folder selector to select a config folder where the configs (starting scripts isntallation script config.json and every other save or config file) are being saved
 - [X] when changeing a directory path (mc_servers or configs folder) and the old one has content inside it then move all the files from the old folder to the new folder path and delete the old folder so i only have the new folder with the old files inside it
-- [ ] loading animation when chaning the foldes (while moving files)
+- [X] loading animation when chaning the foldes (while moving files)
 - [ ] add a remote file explorer to select the path for the configs
 - [ ] add a create server modal like the modals in detailed server view
 - [ ] the delete server button in the index.html still opens a alert fix that so it opens a modal like in the detailed server view

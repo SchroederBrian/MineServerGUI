@@ -102,7 +102,10 @@
                         <input type="text" class="form-control" id="configs-dir-input" placeholder="Enter path to configs directory">
                         <div class="form-text">All server-specific scripts and configurations will be stored here.</div>
                     </div>
-                    <button class="btn btn-primary" id="save-settings-btn">Save Settings</button>
+                    <button class="btn btn-primary" id="save-settings-btn">
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                        <span class="button-text">Save Settings</span>
+                    </button>
                     <hr>
                     <h5>Manage Screens</h5>
                     <div id="screen-list" class="list-group mb-3">
