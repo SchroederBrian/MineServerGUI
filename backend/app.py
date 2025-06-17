@@ -44,7 +44,7 @@ def save_config(config_data):
 
 # Load config on startup
 config = load_config()
-SERVER_DIR = config['mc_servers_path']
+SERVERS_DIR = config['mc_servers_path']
 
 # --- Global State ---
 # This dictionary will hold the running server subprocesses
@@ -162,7 +162,7 @@ def get_server_details(server_name):
     if '..' in server_name or '/' in server_name or '\\' in server_name:
         return jsonify({"error": "Invalid server name format"}), 400
 
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": f"Server '{server_name}' not found"}), 404
 
@@ -183,7 +183,7 @@ def get_server_details(server_name):
 @app.route('/api/servers/<server_name>/port', methods=['POST'])
 def update_server_port(server_name):
     """Updates the server port in the server.properties file."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -249,7 +249,7 @@ def handle_servers():
         if not eula_accepted:
             return jsonify({'error': 'EULA must be accepted'}), 400
         
-        server_path = os.path.join(SERVER_DIR, server_name)
+        server_path = os.path.join(SERVERS_DIR, server_name)
         if os.path.exists(server_path):
             return jsonify({'error': 'A server with this name already exists'}), 409
 
@@ -279,11 +279,11 @@ def handle_servers():
 
     # --- GET Request Handling ---
     servers = []
-    if not os.path.exists(SERVER_DIR):
+    if not os.path.exists(SERVERS_DIR):
         return jsonify([])
 
-    for server_name in os.listdir(SERVER_DIR):
-        server_path = os.path.join(SERVER_DIR, server_name)
+    for server_name in os.listdir(SERVERS_DIR):
+        server_path = os.path.join(SERVERS_DIR, server_name)
         if os.path.isdir(server_path):
             properties = get_server_properties(server_path)
             metadata = get_server_metadata(server_path)
@@ -329,7 +329,7 @@ def server_action(server_name, action):
 @app.route('/api/servers/<server_name>/clear-logs', methods=['POST'])
 def clear_logs(server_name):
     """Clears the server's log file and resets the log counter."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     log_file_path = os.path.join(server_path, 'logs', 'latest.log')
     
     if not os.path.isdir(server_path):
@@ -378,7 +378,7 @@ def sanitize_path(base_path, user_path):
 @app.route('/api/servers/<server_name>/files', methods=['GET'])
 def list_files(server_name):
     """Lists files and folders in a given path."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -411,7 +411,7 @@ def list_files(server_name):
 @app.route('/api/servers/<server_name>/files/content', methods=['GET', 'POST'])
 def handle_file_content(server_name):
     """Gets or saves the content of a file."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -462,7 +462,7 @@ def handle_file_content(server_name):
 
 def get_install_script_path(server_name):
     """Returns the path to the install_script.json for a given server."""
-    return os.path.join(SERVER_DIR, server_name, 'install_script.json')
+    return os.path.join(SERVERS_DIR, server_name, 'install_script.json')
 
 @app.route('/api/servers/<server_name>/install-script', methods=['GET', 'POST'])
 def handle_install_script(server_name):
@@ -484,7 +484,7 @@ def handle_install_script(server_name):
         return jsonify({"commands": []})
 
 def get_start_script_path(server_name):
-    return os.path.join(SERVER_DIR, server_name, 'start_script.json')
+    return os.path.join(SERVERS_DIR, server_name, 'start_script.json')
 
 @app.route('/api/servers/<server_name>/start-script', methods=['GET', 'POST'])
 def handle_start_script(server_name):
@@ -508,7 +508,7 @@ def handle_start_script(server_name):
 @app.route('/api/servers/<server_name>/install', methods=['POST'])
 def run_install_script(server_name):
     """Runs the installation script for a server."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -636,7 +636,7 @@ def handle_console(server_name):
 @app.route('/api/servers/<server_name>/log', methods=['GET'])
 def get_server_log(server_name):
     """Tails the server's latest.log file."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     log_file_path = os.path.join(server_path, 'logs', 'latest.log')
 
     if not os.path.exists(log_file_path):
@@ -668,7 +668,7 @@ def not_found_error(error):
 @app.route('/api/settings', methods=['GET', 'POST'])
 def handle_settings():
     """Handles getting and saving application settings."""
-    global SERVER_DIR, config
+    global SERVERS_DIR, config
     if request.method == 'POST':
         data = request.get_json()
         new_path = data.get('mc_servers_path')
@@ -681,7 +681,7 @@ def handle_settings():
         save_config(config)
 
         # Update the global variable for the current session
-        SERVER_DIR = new_path
+        SERVERS_DIR = new_path
         
         # You might need to restart the app or dynamically reload resources
         # for this change to be fully effective everywhere.
@@ -756,7 +756,7 @@ def install_java(server_name):
     Downloads and extracts a specific JDK version for a server.
     The output is streamed to the installation log.
     """
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -851,7 +851,7 @@ def install_java(server_name):
 @app.route('/api/servers/<server_name>', methods=['DELETE'])
 def delete_server(server_name):
     """Deletes a server after stopping it."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -883,7 +883,7 @@ def find_java_executable(server_dir):
 
 def start_server(server_name):
     """Starts the server using only the commands in start_script.json."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     screen_session_name = get_screen_session_name(server_name)
     
     if is_server_running(server_name):
@@ -987,7 +987,7 @@ def stop_server(server_name):
 @app.route('/api/servers/<server_name>/files/delete', methods=['POST'])
 def delete_files(server_name):
     """Deletes a list of files and/or folders."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
 
@@ -1024,7 +1024,7 @@ def delete_files(server_name):
 @app.route('/api/servers/<server_name>/files/rename', methods=['POST'])
 def rename_file(server_name):
     """Renames a file or folder."""
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
         
@@ -1056,7 +1056,7 @@ def rename_file(server_name):
 
 @app.route('/api/servers/<server_name>/reapply-eula', methods=['POST'])
 def reapply_eula(server_name):
-    server_path = os.path.join(SERVER_DIR, server_name)
+    server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({'error': 'Server not found'}), 404
 
@@ -1065,6 +1065,73 @@ def reapply_eula(server_name):
         with open(eula_path, 'w') as f:
             f.write('eula=true\n')
         return jsonify({'message': 'EULA re-applied successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/screens', methods=['GET'])
+def list_screens():
+    try:
+        # We use 'S' instead of 's' in the command to get the full socket name
+        result = subprocess.run(['screen', '-ls'], capture_output=True, text=True, check=True)
+        output = result.stdout
+        screens = []
+        # A more robust regex to capture PID, name, and date
+        for line in output.splitlines():
+            match = re.search(r'\t(\d+)\.(.*?)\t\((.*?)\)', line)
+            if match:
+                pid, name, details = match.groups()
+                screens.append({'pid': pid, 'name': name, 'details': details})
+        return jsonify(screens)
+    except FileNotFoundError:
+        # This handles the case where 'screen' is not installed
+        return jsonify({'error': 'screen command not found. Is GNU Screen installed and in your PATH?'}), 500
+    except subprocess.CalledProcessError as e:
+        # This handles cases where screen -ls returns a non-zero exit code (e.g., no screens running)
+        if "No Sockets found" in e.stdout or "No Sockets found" in e.stderr:
+            return jsonify([]) # Return an empty list if no screens are running
+        return jsonify({'error': f"Failed to list screens: {e.stderr}"}), 500
+
+@app.route('/api/screens/terminate-all', methods=['POST'])
+def terminate_all_screens():
+    try:
+        # This command gracefully terminates all screen sessions
+        subprocess.run(['pkill', 'screen'], check=True)
+        return jsonify({'message': 'All screen sessions terminated.'})
+    except FileNotFoundError:
+        return jsonify({'error': 'pkill command not found. Is pkill installed?'}), 500
+    except subprocess.CalledProcessError as e:
+        # pkill returns 1 if no processes were matched, which isn't a failure in our case.
+        if e.returncode == 1:
+            return jsonify({'message': 'No active screen sessions to terminate.'})
+        return jsonify({'error': f"Failed to terminate screens: {e.stderr}"}), 500
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+        return jsonify(config)
+    except FileNotFoundError:
+        return jsonify({'error': 'Config file not found.'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config', methods=['POST'])
+def save_config():
+    try:
+        data = request.get_json()
+        if 'servers_dir' not in data:
+            return jsonify({'error': 'servers_dir is required.'}), 400
+        
+        # You might want to add validation here to ensure the path is valid
+        
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+            
+        global SERVERS_DIR
+        SERVERS_DIR = data['servers_dir']
+        
+        return jsonify({'message': 'Settings saved successfully.'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

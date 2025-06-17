@@ -93,16 +93,20 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-body-secondary">The application will reload after changing the server folder path.</p>
                     <div class="mb-3">
-                        <label for="mcServersPath" class="form-label">Current Minecraft Servers Folder</label>
-                        <div class="input-group">
-                            <input type="text" id="mcServersPath" class="form-control bg-dark-subtle" readonly>
-                            <button class="btn btn-outline-secondary" type="button" id="browsePathBtn" data-bs-toggle="modal" data-bs-target="#fileExplorerModal">
-                                <i class="fas fa-folder-open me-2"></i>Choose a New Folder
-                            </button>
-                        </div>
+                        <label for="servers-dir-input" class="form-label">Minecraft Servers Directory</label>
+                        <input type="text" class="form-control" id="servers-dir-input" placeholder="Enter path to servers directory">
                     </div>
+                    <button class="btn btn-primary" id="save-settings-btn">Save Settings</button>
+                    <hr>
+                    <h5>Manage Screens</h5>
+                    <div id="screen-list" class="list-group mb-3">
+                        <!-- Screen sessions will be listed here -->
+                    </div>
+                    <button class="btn btn-danger" id="terminate-all-screens-btn">Terminate All Screens</button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>

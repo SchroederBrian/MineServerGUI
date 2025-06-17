@@ -1022,6 +1022,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(errorData.error || 'Failed to delete server.');
             }
 
+            // Remove server-specific data from localStorage
+            localStorage.removeItem(`mc_saved_commands_${serverId}`);
+            localStorage.removeItem(`mc_log_autoscroll_${serverId}`);
+            console.log(`[CLEANUP] Removed saved commands and settings for server: ${serverId}`);
+
             await Swal.fire(
                 'Deleted!',
                 'Server has been deleted.',
