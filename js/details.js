@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const fileEditorView = document.getElementById('file-editor');
     const breadcrumbEl = document.getElementById('breadcrumb');
     const fileListContainer = document.getElementById('file-list-container');
+    const loadingSpinner = document.getElementById('loading-spinner');
     const reloadFilesBtn = document.getElementById('reload-files-btn');
     const selectionActionBar = document.getElementById('selection-action-bar');
     const selectionCountEl = document.getElementById('selection-count');
@@ -371,6 +372,9 @@ document.addEventListener('DOMContentLoaded', function () {
         selectedFiles.clear();
         updateSelectionActions();
 
+        if (loadingSpinner) loadingSpinner.classList.remove('d-none');
+        fileListContainer.querySelectorAll('.list-group-item, .text-danger').forEach(el => el.remove());
+
         try {
             const response = await fetch(`${API_URL}/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`);
             if (!response.ok) throw new Error('Failed to fetch files');
@@ -379,13 +383,20 @@ document.addEventListener('DOMContentLoaded', function () {
             currentPath = path;
         } catch (error) {
             console.error('File fetch error:', error);
-            fileListContainer.innerHTML = `<p class="text-danger">Could not load files.</p>`;
+            const errorEl = document.createElement('p');
+            errorEl.className = 'text-danger p-3';
+            errorEl.textContent = 'Could not load files.';
+            fileListContainer.appendChild(errorEl);
+        } finally {
+            if (loadingSpinner) loadingSpinner.classList.add('d-none');
         }
     };
     
     const renderFileList = (files, path) => {
         renderBreadcrumb(path);
-        fileListContainer.innerHTML = '';
+        const items = fileListContainer.querySelectorAll('.list-group-item');
+        items.forEach(item => item.remove());
+
         if (path !== '.') {
             const parentDirItem = document.createElement('a');
             parentDirItem.href = '#';
