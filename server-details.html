@@ -79,6 +79,12 @@
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-pane" type="button" role="tab"><i class="fas fa-cog me-2"></i>Settings</button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="scripts-tab" data-bs-toggle="tab" data-bs-target="#scripts-tab-pane" type="button" role="tab" aria-controls="scripts-tab-pane" aria-selected="false">Scripts</button>
+                            </li>
+                            <li class="nav-item" role="presentation" id="performance-tab-item" style="display: none;">
+                                <button class="nav-link" id="performance-tab" data-bs-toggle="tab" data-bs-target="#performance-tab-pane" type="button" role="tab" aria-controls="performance-tab-pane" aria-selected="false">Performance</button>
+                            </li>
                         </ul>
                     </div>
                     <div class="card-body">
@@ -248,6 +254,19 @@
                                      <div class="d-grid">
                                          <button id="delete-server-btn" class="btn btn-danger"><i class="fas fa-trash-alt me-2"></i>Delete This Server</button>
                                      </div>
+                                </div>
+                            </div>
+                            <!-- Scripts Tab -->
+                            <div class="tab-pane fade" id="scripts-tab-pane" role="tabpanel" aria-labelledby="scripts-tab" tabindex="0">
+                                <!-- Content for Scripts -->
+                                <div class="row mt-4">
+                                    <!-- Existing scripts content -->
+                                </div>
+                            </div>
+                            <!-- Performance Tab -->
+                            <div class="tab-pane fade" id="performance-tab-pane" role="tabpanel" aria-labelledby="performance-tab" tabindex="0">
+                                <div id="performance-content" class="mt-4">
+                                    <!-- Content will be dynamically loaded by details.js -->
                                 </div>
                             </div>
                         </div>

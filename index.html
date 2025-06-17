@@ -8,6 +8,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- SweetAlert2 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -37,47 +39,14 @@
             <!-- Server Creation Column -->
             <div class="col-lg-4">
                 <div class="card bg-dark shadow">
-                    <div class="card-body p-4">
+                    <div class="card-body p-4 text-center">
                         <h2 class="card-title text-white mb-4">Create New Server</h2>
-                        <form id="createServerForm">
-                            <div class="mb-3">
-                                <label for="serverName" class="form-label">Server Name</label>
-                                <input type="text" id="serverName" name="serverName" class="form-control bg-dark-subtle" placeholder="My Awesome Server" required>
-                            </div>
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-6">
-                                    <label for="serverType" class="form-label">Server Type</label>
-                                    <select id="serverType" name="serverType" class="form-select bg-dark-subtle">
-                                        <option selected>Paper</option>
-                                        <option>Purpur</option>
-                                        <option>Fabric</option>
-                                        <option>Vanilla</option>
-                                        <option>Forge</option>
-                                        <option>NeoForge</option>
-                                        <option>Quilt</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label for="minecraftVersion" class="form-label">Version</label>
-                                    <input type="text" id="minecraftVersion" name="minecraftVersion" class="form-control bg-dark-subtle" placeholder="e.g., 1.21" required>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="port" class="form-label">Port Number</label>
-                                <input type="number" id="port" name="port" class="form-control bg-dark-subtle" value="25565" required>
-                            </div>
-                            <div class="form-check mb-4">
-                                <input class="form-check-input" type="checkbox" id="eula-accept" required>
-                                <label class="form-check-label" for="eula-accept">
-                                    I accept the <a href="https://account.mojang.com/documents/minecraft_eula" target="_blank">Minecraft EULA</a>
-                                </label>
-                            </div>
-                            <div class="d-grid">
-                                <button type="submit" class="btn btn-success btn-lg">
-                                    <i class="fas fa-plus-circle me-2"></i>Create Server
-                                </button>
-                            </div>
-                        </form>
+                        <p class="text-body-secondary">Ready to start a new adventure?</p>
+                        <div class="d-grid">
+                            <button id="createServerBtn" class="btn btn-success btn-lg">
+                                <i class="fas fa-plus-circle me-2"></i>Create Server
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -95,11 +64,17 @@
                 <div class="modal-body">
                     <div class="mb-3">
                         <label for="servers-dir-input" class="form-label">Minecraft Servers Directory</label>
-                        <input type="text" class="form-control" id="servers-dir-input" placeholder="Enter path to servers directory">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="servers-dir-input" placeholder="Enter path to servers directory">
+                            <button class="btn btn-outline-secondary browse-btn" type="button" data-input-target="servers-dir-input">Browse</button>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label for="configs-dir-input" class="form-label">Configs Directory</label>
-                        <input type="text" class="form-control" id="configs-dir-input" placeholder="Enter path to configs directory">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="configs-dir-input" placeholder="Enter path to configs directory">
+                            <button class="btn btn-outline-secondary browse-btn" type="button" data-input-target="configs-dir-input">Browse</button>
+                        </div>
                         <div class="form-text">All server-specific scripts and configurations will be stored here.</div>
                     </div>
                     <button class="btn btn-primary" id="save-settings-btn">
@@ -144,6 +119,8 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="js/main.js"></script>
     <script src="js/settings.js"></script>
 </body>

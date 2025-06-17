@@ -1419,7 +1419,185 @@ def migrate_scripts_to_configs_dir():
     print("Script migration check complete.")
 
 
+# --- Spark Performance Monitor ---
+SPARK_DOWNLOAD_URL = "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark.jar"
+
+@app.route('/api/servers/<server_name>/spark/status', methods=['GET'])
+def get_spark_status(server_name):
+    """Checks if the spark plugin is installed or bundled with the server."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    plugins_dir = os.path.join(server_path, 'plugins')
+    spark_jar_path = os.path.join(plugins_dir, 'spark.jar')
+    
+    metadata = get_server_metadata(server_path)
+    server_type = metadata.get('server_type', 'vanilla')
+    
+    # Paper and Purpur bundle Spark by default.
+    if server_type in ['paper', 'purpur']:
+        return jsonify({"installed": True, "status": "bundled", "message": "Spark is bundled with this server type."})
+
+    # For other types that support plugins but don't bundle Spark (e.g., Spigot)
+    supports_plugins = server_type in ['spigot'] 
+
+    if not supports_plugins:
+        return jsonify({"installed": False, "status": "unsupported", "message": "This server type does not support plugins."})
+
+    if os.path.exists(spark_jar_path):
+        return jsonify({"installed": True, "status": "installed", "message": "Spark is installed."})
+    else:
+        return jsonify({"installed": False, "status": "not_installed", "message": "Spark is not installed."})
+
+@app.route('/api/servers/<server_name>/spark/install', methods=['POST'])
+def install_spark(server_name):
+    """Downloads and installs the Spark plugin."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+
+    plugins_dir = os.path.join(server_path, 'plugins')
+    os.makedirs(plugins_dir, exist_ok=True)
+    spark_jar_path = os.path.join(plugins_dir, 'spark.jar')
+
+    try:
+        # Using a thread to prevent blocking the main app
+        def download_task():
+            print(f"Starting Spark download for {server_name}...")
+            try:
+                with requests.get(SPARK_DOWNLOAD_URL, stream=True) as r:
+                    r.raise_for_status()
+                    with open(spark_jar_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                print(f"Spark downloaded successfully to {spark_jar_path}")
+            except Exception as e:
+                print(f"Error downloading Spark: {e}")
+        
+        Thread(target=download_task, daemon=True).start()
+        
+        return jsonify({"message": "Spark installation started. It will be available after the next server restart."}), 202
+    except Exception as e:
+        return jsonify({"error": f"Failed to start Spark installation: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/spark/command', methods=['POST'])
+def run_spark_command(server_name):
+    """Runs a spark command and returns the output."""
+    if not is_server_running(server_name):
+        return jsonify({"error": "Server is not running."}), 409
+
+    data = request.get_json()
+    spark_command = data.get('command')
+    if not spark_command:
+        return jsonify({"error": "Spark command is required."}), 400
+
+    screen_session_name = get_screen_session_name(server_name)
+    
+    # Sanitize the command to prevent injection
+    # We are only allowing specific spark commands like "healthreport", "profiler", etc.
+    allowed_commands = ["healthreport", "profiler start", "profiler stop", "status"]
+    if not any(spark_command.startswith(cmd) for cmd in allowed_commands):
+        return jsonify({"error": "Invalid or disallowed Spark command."}), 400
+
+    full_command = f"spark {spark_command}"
+    
+    command_to_run = ['wsl', 'screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', f"{full_command}\\n"] if sys.platform == "win32" \
+                else ['screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', f"{full_command}\n"]
+
+    try:
+        subprocess.run(command_to_run, check=True)
+        # Note: This just sends the command. Getting the output is more complex
+        # and would require watching the latest.log file.
+        # For now, we'll just confirm the command was sent.
+        return jsonify({"message": f"Command '{full_command}' sent to server. Check the server console or logs for output."})
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        return jsonify({"error": f"Failed to execute command: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/spark/health-report', methods=['GET'])
+def get_spark_health_report(server_name):
+    """Triggers and parses a spark health report for immediate data."""
+    if not is_server_running(server_name):
+        return jsonify({"error": "Server is not running."}), 409
+
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    log_file_path = os.path.join(server_path, 'logs', 'latest.log')
+
+    if not os.path.exists(log_file_path):
+        return jsonify({"error": "Log file not found."}), 404
+        
+    # Get the file size *before* sending the command
+    last_pos = os.path.getsize(log_file_path)
+
+    # --- Send command to server ---
+    screen_session_name = get_screen_session_name(server_name)
+    spark_command = "spark healthreport --silent"
+    command_to_run = ['wsl', 'screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', f"{spark_command}\\n"] if sys.platform == "win32" \
+                else ['screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', f"{spark_command}\n"]
+    
+    try:
+        subprocess.run(command_to_run, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"Error executing spark command for {server_name}: {e}")
+        return jsonify({"error": "Failed to execute spark command on the server."}), 500
+
+    # --- Watch log file for new content ---
+    content = ""
+    start_time = time.time()
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    
+    # This loop will read the log file in chunks without holding it open, preventing file lock issues.
+    while time.time() - start_time < 10: # 10 second timeout
+        time.sleep(0.25)
+        try:
+            with open(log_file_path, 'r', encoding='utf-8') as f:
+                f.seek(last_pos)
+                new_content = f.read()
+                if new_content:
+                    content += new_content
+                    last_pos = f.tell()
+                # A marker for the end of the spark report
+                if "Disk usage:" in content:
+                    break
+        except Exception as e:
+            print(f"Error reading log file for {server_name}: {e}")
+            # Continue trying for the duration of the timeout
+            
+    if not content:
+        return jsonify({"error": "Failed to retrieve health report from logs (timeout)."}), 408
+
+    # --- Parse the collected log content ---
+    clean_content = ansi_escape.sub('', content)
+    report_data = {}
+
+    try:
+        tps_match = re.search(r"TPS from last .*:\s*([^\n]+)", clean_content)
+        if tps_match:
+            report_data["tps"] = tps_match.group(1).replace('*','').strip()
+
+        cpu_process_match = re.search(r"([\d\.]+)%.*\(process\)", clean_content)
+        if cpu_process_match:
+            report_data["cpu_process"] = float(cpu_process_match.group(1))
+
+        cpu_system_match = re.search(r"([\d\.]+)%.*\(system\)", clean_content)
+        if cpu_system_match:
+            report_data["cpu_system"] = float(cpu_system_match.group(1))
+
+        mem_match = re.search(r"Memory usage:\s*([\d\.]+ [MGT]?B)\s*/\s*([\d\.]+ [MGT]?B)", clean_content)
+        if mem_match:
+            report_data["heap_memory"] = {"used": mem_match.group(1).strip(), "total": mem_match.group(2).strip()}
+        
+        if len(report_data) < 4:
+            return jsonify({"error": "Failed to parse the complete health report from logs."}), 408
+            
+        return jsonify(report_data)
+    except Exception as e:
+        print(f"Error parsing spark report for {server_name}: {e}")
+        return jsonify({"error": f"An error occurred while parsing the health report: {e}"}), 500
+
+
 if __name__ == '__main__':
-    if not config.get('migrated_scripts_to_config_dir'):
-        migrate_scripts_to_configs_dir()
-    app.run(debug=True, port=5000) 
+    # Before starting, run the migration check
+    migrate_scripts_to_configs_dir()
+    print("Script migration check complete.")
+    app.run(debug=True) 

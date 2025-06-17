@@ -1,4 +1,5 @@
 {
-    "servers_dir": "/mnt/c/Users/bobby/Desktop/mc_servers",
-    "configs_dir": "/mnt/c/Users/bobby/Documents/AI/backend/server_configs"
+    "servers_dir": "/mnt/c/Users/bobby/Desktop/test",
+    "configs_dir": "/mnt/c/Users/bobby/Documents/AI/backend/server_configs",
+    "migrated_scripts_to_config_dir": true
 }

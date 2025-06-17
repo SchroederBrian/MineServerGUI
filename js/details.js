@@ -93,6 +93,10 @@ document.addEventListener('DOMContentLoaded', function () {
     // Danger Zone
     const deleteServerBtn = document.getElementById('delete-server-btn');
 
+    // Performance Tab
+    const performanceTabItem = document.getElementById('performance-tab-item');
+    const performanceContent = document.getElementById('performance-content');
+
     let currentPath = '.';
     let selectedFiles = new Set();
     let currentLogLine = 0;
@@ -1408,4 +1412,214 @@ document.addEventListener('DOMContentLoaded', function () {
             fileUploadInput.value = '';
         }
     };
+
+    // --- Spark Performance Monitor ---
+
+    const checkSparkStatus = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/status`);
+            const data = await response.json();
+
+            if (data.status === 'unsupported') {
+                performanceTabItem.style.display = 'none';
+                return;
+            }
+
+            performanceTabItem.style.display = 'block';
+
+            if (data.installed) {
+                renderSparkControls(data.status);
+                fetchAndDisplaySparkReport(); // Fetch report on first load
+            } else {
+                performanceContent.innerHTML = `
+                    <div class="text-center">
+                        <h3 class="mb-3">Spark Performance Monitoring</h3>
+                        <p class="text-body-secondary">Spark is a performance profiler that can help you diagnose performance issues on your server.</p>
+                        <button id="install-spark-btn" class="btn btn-primary btn-lg">
+                            <i class="fas fa-download me-2"></i>Install Spark
+                        </button>
+                    </div>
+                `;
+                document.getElementById('install-spark-btn').addEventListener('click', installSpark);
+            }
+        } catch (error) {
+            console.error('Error checking Spark status:', error);
+            performanceContent.innerHTML = '<p class="text-danger">Could not check Spark status.</p>';
+        }
+    };
+
+    const installSpark = async () => {
+        const btn = document.getElementById('install-spark-btn');
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Installing...`;
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/install`, { method: 'POST' });
+            const data = await response.json();
+            if (response.ok) {
+                Swal.fire({
+                    title: 'Installation Started',
+                    text: data.message,
+                    icon: 'info',
+                    customClass: { popup: 'bg-dark text-white' }
+                });
+                performanceContent.innerHTML = `
+                    <div class="text-center">
+                        <p class="text-success">Spark is being installed in the background.</p>
+                        <p class="text-body-secondary">Please restart your server for the changes to take effect.</p>
+                    </div>
+                `;
+            } else {
+                throw new Error(data.error || 'Unknown installation error');
+            }
+        } catch (error) {
+            Swal.fire({
+                title: 'Installation Failed',
+                text: error.message,
+                icon: 'error',
+                customClass: { popup: 'bg-dark text-white' }
+            });
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fas fa-download me-2"></i>Install Spark`;
+        }
+    };
+
+    const renderSparkControls = (status) => {
+        let notice = '';
+        if (status === 'bundled') {
+            notice = '<p class="text-white-50 small mt-3">Spark is bundled with your server software.</p>';
+        }
+
+        performanceContent.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="mb-0">Live Performance Metrics</h3>
+                <button id="refresh-spark-report-btn" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-sync-alt me-2"></i>Refresh
+                </button>
+            </div>
+            <div id="spark-report-container" class="p-3 rounded bg-dark-tertiary">
+                <div class="text-center p-5">
+                    <p class="text-body-secondary">Click "Refresh" to load performance data from Spark.</p>
+                </div>
+            </div>
+            ${notice}
+        `;
+
+        document.getElementById('refresh-spark-report-btn').addEventListener('click', fetchAndDisplaySparkReport);
+    };
+
+    const fetchAndDisplaySparkReport = async () => {
+        const container = document.getElementById('spark-report-container');
+        const refreshBtn = document.getElementById('refresh-spark-report-btn');
+
+        // Show loading state
+        if(refreshBtn) {
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Loading...`;
+        }
+        container.innerHTML = `
+            <div class="text-center p-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="text-body-secondary mt-3">Fetching health report from the server...</p>
+            </div>
+        `;
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/health-report`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+            }
+
+            // Render the report
+            container.innerHTML = `
+                <div class="row g-4">
+                    <div class="col-md-4">
+                        <div class="card bg-dark text-white h-100">
+                            <div class="card-body text-center">
+                                <h6 class="card-subtitle mb-2 text-body-secondary">Ticks per Second (TPS)</h6>
+                                <p class="display-6">${data.tps ? data.tps.split(',')[0].trim() : 'N/A'}</p>
+                                <small class="text-white-50">5s, 10s, 1m, 5m, 15m</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark text-white h-100">
+                            <div class="card-body text-center">
+                                <h6 class="card-subtitle mb-2 text-body-secondary">Process CPU Usage</h6>
+                                <p class="display-6">${data.cpu_process?.toFixed(1) ?? 'N/A'}%</p>
+                                <small class="text-white-50">System CPU: ${data.cpu_system?.toFixed(1) ?? 'N/A'}%</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark text-white h-100">
+                            <div class="card-body text-center">
+                                <h6 class="card-subtitle mb-2 text-body-secondary">Heap Memory</h6>
+                                <p class="display-6">${data.heap_memory?.used ?? 'N/A'}</p>
+                                <small class="text-white-50">Total: ${data.heap_memory?.total ?? 'N/A'}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+        } catch (error) {
+            container.innerHTML = `
+                <div class="text-center p-5">
+                    <i class="fas fa-exclamation-triangle fa-2x text-danger mb-3"></i>
+                    <h5 class="text-danger">Failed to load report</h5>
+                    <p class="text-body-secondary">${error.message}</p>
+                </div>
+            `;
+        } finally {
+            // Restore button
+            if(refreshBtn) {
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = `<i class="fas fa-sync-alt me-2"></i>Refresh`;
+            }
+        }
+    };
+
+    const runSparkCommand = async (command) => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: command })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                Swal.fire({
+                    title: 'Command Sent',
+                    text: data.message,
+                    icon: 'success',
+                    timer: 3000,
+                    customClass: { popup: 'bg-dark text-white' }
+                });
+            } else {
+                throw new Error(data.error || `Failed to run command.`);
+            }
+        } catch (error) {
+            Swal.fire({
+                title: 'Error',
+                text: error.message,
+                icon: 'error',
+                customClass: { popup: 'bg-dark text-white' }
+            });
+        }
+    };
+
+    // Initial call to fetch data
+    fetchInstallScript();
+    fetchStartScript();
+    initializeRamEditor();
+    populateLoaders();
+    checkSparkStatus();
+
+    // Event Listeners
+    startBtn.addEventListener('click', () => handleServerAction('start'));
 });

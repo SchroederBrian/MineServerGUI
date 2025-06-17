@@ -8,6 +8,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const screenList = document.getElementById('screen-list');
     const terminateAllScreensBtn = document.getElementById('terminate-all-screens-btn');
 
+    // File Explorer Elements
+    const fileExplorerModal = new bootstrap.Modal(document.getElementById('fileExplorerModal'));
+    const fileExplorerList = document.getElementById('fileExplorerList');
+    const currentPathDisplay = document.getElementById('currentPathDisplay');
+    const selectDirectoryBtn = document.getElementById('selectDirectoryBtn');
+    const browseBtns = document.querySelectorAll('.browse-btn');
+    let activeInputId = null; // To store which input triggered the browser
+
     const fetchConfig = async () => {
         try {
             const response = await fetch(`${API_URL}/api/config`);
@@ -20,6 +28,57 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Error fetching config:', error);
+        }
+    };
+
+    const openFileExplorer = async (path = '') => {
+        try {
+            const response = await fetch(`${API_URL}/api/browse?path=${encodeURIComponent(path)}`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                Swal.fire('Error', `Failed to browse path: ${data.error}`, 'error');
+                return;
+            }
+            
+            currentPathDisplay.textContent = data.current_path;
+            fileExplorerList.innerHTML = ''; // Clear previous content
+
+            // Add an 'up' directory item
+            if (data.parent_path !== null && data.parent_path !== undefined) {
+                 const upEl = document.createElement('a');
+                 upEl.href = '#';
+                 upEl.className = 'list-group-item list-group-item-action list-group-item-secondary';
+                 upEl.innerHTML = `<i class="fas fa-arrow-up me-2"></i>..`;
+                 upEl.addEventListener('click', (e) => {
+                     e.preventDefault();
+                     openFileExplorer(data.parent_path);
+                 });
+                 fileExplorerList.appendChild(upEl);
+            }
+
+            data.directories.forEach(dir => {
+                const dirEl = document.createElement('a');
+                dirEl.href = '#';
+                dirEl.className = 'list-group-item list-group-item-action';
+                dirEl.innerHTML = `<i class="fas fa-folder me-2"></i>${dir}`;
+                dirEl.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    let newPath;
+                    if (data.current_path === 'My Computer') {
+                        newPath = dir;
+                    } else {
+                        // Use forward slashes for consistency, as the backend expects them on non-Windows platforms.
+                        const basePath = data.current_path.replace(/\\\\/g, '/');
+                        newPath = basePath.endsWith('/') ? `${basePath}${dir}` : `${basePath}/${dir}`;
+                    }
+                    openFileExplorer(newPath);
+                });
+                fileExplorerList.appendChild(dirEl);
+            });
+
+        } catch (error) {
+            Swal.fire('Error', `Error opening file explorer: ${error}`, 'error');
         }
     };
 
@@ -57,6 +116,28 @@ document.addEventListener('DOMContentLoaded', () => {
             saveSettingsBtn.disabled = false;
         }
     };
+
+    // Event Listeners for Browse Buttons
+    browseBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            activeInputId = btn.getAttribute('data-input-target');
+            const currentPath = document.getElementById(activeInputId).value;
+            openFileExplorer(currentPath);
+            fileExplorerModal.show();
+        });
+    });
+
+    // Event Listener for Select Directory Button
+    selectDirectoryBtn.addEventListener('click', () => {
+        if (activeInputId) {
+            const selectedPath = currentPathDisplay.textContent;
+            // Avoid setting path to "My Computer"
+            if (selectedPath !== "My Computer") {
+                document.getElementById(activeInputId).value = selectedPath;
+            }
+        }
+        fileExplorerModal.hide();
+    });
 
     const fetchScreens = async () => {
         try {

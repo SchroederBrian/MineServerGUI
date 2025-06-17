@@ -15,13 +15,13 @@
 - [X] add a folder selector like the mc_servers folder selector to select a config folder where the configs (starting scripts isntallation script config.json and every other save or config file) are being saved
 - [X] when changeing a directory path (mc_servers or configs folder) and the old one has content inside it then move all the files from the old folder to the new folder path and delete the old folder so i only have the new folder with the old files inside it
 - [X] loading animation when chaning the foldes (while moving files)
-- [ ] add a remote file explorer to select the path for the configs
-- [ ] add a create server modal like the modals in detailed server view
-- [ ] the delete server button in the index.html still opens a alert fix that so it opens a modal like in the detailed server view
-- [ ] fix server stop button
-- [ ] add a perforamce monitor using spark plugin
+- [X] add a custom made file explorer to select the path for the configs folder and the mc_servers folder you can imagine it like a remote file explorer taht shows me the folder tree of the server not from the user
+- [X] add a create server modal like the modals in detailed server view using sweetalert
+- [X] the delete server button in the index.html still opens a alert fix that so it opens a modal like in the detailed server view
+- [ ] add a perforamce monitor using spark plugin (only on server loaders that also have plugin support)
 - [ ] spark plugin automatic installation and spark plugin reapply button in the settings tab
-- [ ] save the starting commands and the installation comamnds not in the server directory instead in the directory of the app itself and change all related code to work with the new change
-- [ ] installation script erstellen das automatisch das web ui installiert inklusive console menu zum auswählen welche features installiert werden sollen und so weiter
 - [ ] more detailed command editing (command up down movement to edit the order and a edit button to edit a singel comamnd) do it for starting commands and installation commands
+- [ ] save the starting commands and the installation comamnds not in the server directory instead in the directory of the app itself and change all related code to work with the new change
 - [ ] add the ability to select any loader with any version in the settings tab of the detailed view the same method like in the dashboard
+- [ ] installation script erstellen das automatisch das web ui installiert inklusive console menu zum auswählen welche features installiert werden sollen und so weiter
+- [ ] fix server stop button

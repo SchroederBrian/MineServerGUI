@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const serverListElement = document.getElementById('serverList');
-    const createServerForm = document.getElementById('createServerForm');
+    const createServerBtn = document.getElementById('createServerBtn');
     const API_URL = 'http://127.0.0.1:5000';
 
     let servers = [];
@@ -58,43 +58,107 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Handle server creation
-    createServerForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const createButton = e.target.querySelector('button[type="submit"]');
-        const originalButtonText = createButton.innerHTML;
-        createButton.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating...`;
-        createButton.disabled = true;
-
-        const serverData = {
-            server_name: document.getElementById('serverName').value,
-            server_type: document.getElementById('serverType').value.toLowerCase(),
-            version: document.getElementById('minecraftVersion').value,
-            port: document.getElementById('port').value,
-            eula_accepted: document.getElementById('eula-accept').checked,
-        };
-        
-        try {
-            const response = await fetch(`${API_URL}/api/servers`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(serverData)
-            });
-            const result = await response.json();
-            if (!response.ok) {
-                throw new Error(result.error || 'Server creation failed');
+    // Handle server creation with SweetAlert2
+    createServerBtn.addEventListener('click', () => {
+        Swal.fire({
+            title: 'Create a New Minecraft Server',
+            html: `
+                <form id="swal-createServerForm" class="text-start">
+                    <div class="mb-3">
+                        <label for="swal-serverName" class="form-label">Server Name</label>
+                        <input type="text" id="swal-serverName" class="form-control" placeholder="My Awesome Server" required>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="swal-serverType" class="form-label">Server Type</label>
+                            <select id="swal-serverType" class="form-select">
+                                <option selected>Paper</option>
+                                <option>Purpur</option>
+                                <option>Fabric</option>
+                                <option>Vanilla</option>
+                                <option>Forge</option>
+                                <option>NeoForge</option>
+                                <option>Quilt</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="swal-minecraftVersion" class="form-label">Version</label>
+                            <input type="text" id="swal-minecraftVersion" class="form-control" placeholder="e.g., 1.21" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="swal-port" class="form-label">Port Number</label>
+                        <input type="number" id="swal-port" class="form-control" value="25565" required>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="swal-eula-accept" required>
+                        <label class="form-check-label" for="swal-eula-accept">
+                            I accept the <a href="https://account.mojang.com/documents/minecraft_eula" target="_blank">Minecraft EULA</a>
+                        </label>
+                    </div>
+                </form>
+            `,
+            showCancelButton: true,
+            confirmButtonText: 'Create Server',
+            confirmButtonColor: '#198754',
+            customClass: {
+                popup: 'bg-dark text-white',
+                htmlContainer: 'text-body-secondary',
+                input: 'bg-dark-subtle',
+                
+            },
+            preConfirm: () => {
+                const serverName = document.getElementById('swal-serverName').value;
+                const eulaAccepted = document.getElementById('swal-eula-accept').checked;
+                if (!serverName) {
+                    Swal.showValidationMessage(`Server name is required.`);
+                    return false;
+                }
+                if (!eulaAccepted) {
+                    Swal.showValidationMessage(`You must accept the EULA.`);
+                    return false;
+                }
+                return {
+                    server_name: serverName,
+                    server_type: document.getElementById('swal-serverType').value.toLowerCase(),
+                    version: document.getElementById('swal-minecraftVersion').value,
+                    port: document.getElementById('swal-port').value,
+                    eula_accepted: eulaAccepted,
+                };
             }
-            await fetchServers();
-            createServerForm.reset();
-        } catch (error) {
-            console.error('Error creating server:', error);
-            alert(`Error: ${error.message}`);
-        } finally {
-            createButton.innerHTML = originalButtonText;
-            createButton.disabled = false;
-        }
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                const serverData = result.value;
+                
+                Swal.fire({
+                    title: 'Creating Server...',
+                    text: `Server "${serverData.server_name}" is being created. Please wait.`,
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+
+                try {
+                    const response = await fetch(`${API_URL}/api/servers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(serverData)
+                    });
+                    const res = await response.json();
+                    if (!response.ok) {
+                        throw new Error(res.error || 'Server creation failed');
+                    }
+                    await fetchServers();
+                     Swal.fire('Success!', 'Server created successfully!', 'success');
+                } catch (error) {
+                    console.error('Error creating server:', error);
+                    Swal.fire('Error!', `Error creating server: ${error.message}`, 'error');
+                }
+            }
+        });
     });
-    
+
     // Use event delegation for start/stop buttons and card clicks
     serverListElement.addEventListener('click', async (e) => {
         const button = e.target.closest('button');
@@ -117,19 +181,43 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!action) return;
 
         if (action === 'delete') {
-            if (confirm(`Are you sure you want to permanently delete the server "${serverId}"? This cannot be undone.`)) {
-                try {
-                    const response = await fetch(`${API_URL}/api/servers/${serverId}`, { method: 'DELETE' });
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.error || 'Failed to delete server');
-                    }
-                    await fetchServers(); // Refresh the list
-                } catch (error) {
-                    console.error('Error deleting server:', error);
-                    alert(`Error: ${error.message}`);
+            Swal.fire({
+                title: 'Are you sure?',
+                text: `You are about to permanently delete "${serverId}". This action cannot be undone.`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: 'Yes, delete it!',
+                customClass: {
+                    popup: 'bg-dark text-white',
                 }
-            }
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    try {
+                        const response = await fetch(`${API_URL}/api/servers/${serverId}`, { method: 'DELETE' });
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error || 'Failed to delete server');
+                        }
+                        await fetchServers(); // Refresh the list
+                        Swal.fire({
+                           title: 'Deleted!',
+                           text: `Server "${serverId}" has been deleted.`,
+                           icon: 'success',
+                           customClass: { popup: 'bg-dark text-white' }
+                        });
+                    } catch (error) {
+                        console.error('Error deleting server:', error);
+                        Swal.fire({
+                           title: 'Error!',
+                           text: `Failed to delete server: ${error.message}`,
+                           icon: 'error',
+                           customClass: { popup: 'bg-dark text-white' }
+                        });
+                    }
+                }
+            });
             return;
         }
         
