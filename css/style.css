@@ -1,0 +1,14 @@
+body {
+    background-color: #1a202c;
+    /* This is a fallback for if the Bootstrap theme fails */
+}
+
+.server-card {
+    cursor: pointer;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.server-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+} 
