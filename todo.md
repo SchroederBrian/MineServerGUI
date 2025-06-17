@@ -21,6 +21,7 @@
 - [X] automatic port checking (to make sure that a port is not assignt multiple times)
 - [X] more detailed command editing (command up down movement to edit the order and a edit button to edit a singel comamnd) do it for starting commands and installation commands
 - [ ] fix the save ram button to apply the ram settings when Xmx and or Xms is in the any starting command and apply the selected value
+- [ ] fix the console output to not have such weird charachters
 - [ ] save the starting commands and the installation comamnds not in the server directory instead in the directory of the app itself and change all related code to work with the new change
 - [ ] add the ability to select any loader with any version in the settings tab of the detailed view the same method like in the dashboard
 - [ ] installation script erstellen das automatisch das web ui installiert inklusive console menu zum auswählen welche features installiert werden sollen und so weiter
