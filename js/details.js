@@ -93,10 +93,6 @@ document.addEventListener('DOMContentLoaded', function () {
     // Danger Zone
     const deleteServerBtn = document.getElementById('delete-server-btn');
 
-    // Performance Tab
-    const performanceTabItem = document.getElementById('performance-tab-item');
-    const performanceContent = document.getElementById('performance-content');
-
     let currentPath = '.';
     let selectedFiles = new Set();
     let currentLogLine = 0;
@@ -767,22 +763,34 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // --- Installation Script ---
-    let installScript = [];
+    let installCommands = [];
 
     const renderInstallScript = () => {
-        commandListEl.innerHTML = '';
-        installScript.forEach((cmd, index) => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item list-group-item-dark d-flex justify-content-between align-items-center';
-            li.innerHTML = `
-                <span class="font-monospace">${cmd}</span>
-                <button class="btn btn-outline-danger btn-sm" data-index="${index}"><i class="fas fa-trash-alt"></i></button>
-            `;
-            li.querySelector('button').addEventListener('click', () => {
-                installScript.splice(index, 1);
+        renderCommands(commandListEl, installCommands, addCommandBtn, saveScriptBtn, newCommandInput, {
+            onMove: (oldIndex, newIndex) => {
+                if (newIndex < 0 || newIndex >= installCommands.length) return;
+                [installCommands[oldIndex], installCommands[newIndex]] = [installCommands[newIndex], installCommands[oldIndex]];
                 renderInstallScript();
-            });
-            commandListEl.appendChild(li);
+            },
+            onEdit: (index) => {
+                Swal.fire({
+                    title: 'Edit Command',
+                    input: 'text',
+                    inputValue: installCommands[index],
+                    showCancelButton: true,
+                    confirmButtonText: 'Save',
+                    customClass: { popup: 'bg-dark text-white' }
+                }).then((result) => {
+                    if (result.isConfirmed && result.value) {
+                        installCommands[index] = result.value;
+                        renderInstallScript();
+                    }
+                });
+            },
+            onDelete: (index) => {
+                installCommands.splice(index, 1);
+                renderInstallScript();
+            }
         });
     };
 
@@ -790,48 +798,41 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             const response = await fetch(`${API_URL}/api/servers/${serverId}/install-script`);
             const data = await response.json();
-            if (response.ok) {
-                installScript = data.commands || [];
-            } else {
-                installScript = []; // Start with empty on error
-            }
+            installCommands = data.commands || [];
             renderInstallScript();
         } catch (error) {
             console.error('Failed to fetch install script:', error);
-            installScript = [];
-            renderInstallScript();
+            commandListEl.innerHTML = '<li class="list-group-item list-group-item-danger">Failed to load script</li>';
         }
     };
 
+    const saveInstallScript = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/install-script`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ commands: installCommands })
+            });
+            const result = await response.json();
+            if (response.ok) {
+                Swal.fire('Success', 'Install script saved!', 'success');
+            } else {
+                Swal.fire('Error', `Failed to save: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            Swal.fire('Error', `Error saving install script: ${error}`, 'error');
+        }
+    };
+    
     addCommandBtn.addEventListener('click', () => {
         const newCommand = newCommandInput.value.trim();
         if (newCommand) {
-            installScript.push(newCommand);
+            installCommands.push(newCommand);
             newCommandInput.value = '';
             renderInstallScript();
         }
     });
 
-    const saveInstallScript = async () => {
-        const originalContent = saveScriptBtn.innerHTML;
-        saveScriptBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Saving...`;
-        saveScriptBtn.disabled = true;
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/install-script`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ commands: installScript })
-            });
-            if (!response.ok) throw new Error( (await response.json()).error || 'Failed to save script.');
-            // Maybe add a temporary "Saved!" message
-        } catch (error) {
-            Swal.fire('Error', `Error: ${error.message}`, 'error');
-        } finally {
-            saveScriptBtn.innerHTML = originalContent;
-            saveScriptBtn.disabled = false;
-        }
-    };
-    
     function escapeHtml(unsafe) {
         if (typeof unsafe !== 'string') {
             return '';
@@ -845,7 +846,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const runInstallation = async () => {
-        const result = await Swal.fire({
+        const {
+            value: confirmed
+        } = await Swal.fire({
             title: 'Are you sure?',
             text: "This will run the installation script and may modify server files.",
             icon: 'warning',
@@ -854,26 +857,32 @@ document.addEventListener('DOMContentLoaded', function () {
             cancelButtonText: 'Cancel'
         });
 
-        if (!result.isConfirmed) {
-            return;
-        }
-        
-        // Switch to the logs tab to show the output
-        const logsTab = new bootstrap.Tab(document.getElementById('logs-tab'));
-        logsTab.show();
+        if (confirmed) {
+            Swal.fire({
+                title: 'Installation Running',
+                text: 'The installation is running in the background. You can monitor its progress in the Logs tab.',
+                icon: 'info',
+                showConfirmButton: false,
+                timer: 3000,
+                customClass: {
+                    popup: 'bg-dark text-white'
+                }
+            });
 
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/install`, { method: 'POST' });
-            const data = await response.json();
-            
-            if (!response.ok) throw new Error(data.error || 'Failed to start installation.');
-            
-            // The output will now appear in the logs tab automatically.
-            // No need to poll a separate endpoint.
-            Swal.fire('Success', data.message, 'success');
-
-        } catch (error) {
-             Swal.fire('Error', `[INSTALLATION FAILED TO START] ${error.message}`, 'error');
+            try {
+                const response = await fetch(`${API_URL}/api/servers/${serverId}/install`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error);
+                }
+                // Optional: switch to the logs tab automatically
+                const logsTab = new bootstrap.Tab(document.getElementById('logs-tab'));
+                logsTab.show();
+            } catch (error) {
+                Swal.fire('Error', `Failed to start installation: ${error.message}`, 'error');
+            }
         }
     };
 
@@ -917,23 +926,35 @@ document.addEventListener('DOMContentLoaded', function () {
     runInstallBtn.addEventListener('click', runInstallation);
     installJavaBtn.addEventListener('click', installJava);
 
-    // --- Start Command Script ---
-    let startScript = [];
+    // --- Start Commands ---
+    let startCommands = [];
 
     const renderStartScript = () => {
-        startCommandListEl.innerHTML = '';
-        startScript.forEach((cmd, index) => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item list-group-item-dark d-flex justify-content-between align-items-center';
-            li.innerHTML = `
-                <span class="font-monospace">${escapeHtml(cmd)}</span>
-                <button class="btn btn-outline-danger btn-sm" data-index="${index}"><i class="fas fa-trash-alt"></i></button>
-            `;
-            li.querySelector('button').addEventListener('click', () => {
-                startScript.splice(index, 1);
+        renderCommands(startCommandListEl, startCommands, addStartCommandBtn, saveStartScriptBtn, newStartCommandInput, {
+            onMove: (oldIndex, newIndex) => {
+                if (newIndex < 0 || newIndex >= startCommands.length) return;
+                [startCommands[oldIndex], startCommands[newIndex]] = [startCommands[newIndex], startCommands[oldIndex]];
                 renderStartScript();
-            });
-            startCommandListEl.appendChild(li);
+            },
+            onEdit: (index) => {
+                Swal.fire({
+                    title: 'Edit Command',
+                    input: 'text',
+                    inputValue: startCommands[index],
+                    showCancelButton: true,
+                    confirmButtonText: 'Save',
+                    customClass: { popup: 'bg-dark text-white' }
+                }).then((result) => {
+                    if (result.isConfirmed && result.value) {
+                        startCommands[index] = result.value;
+                        renderStartScript();
+                    }
+                });
+            },
+            onDelete: (index) => {
+                startCommands.splice(index, 1);
+                renderStartScript();
+            }
         });
     };
 
@@ -941,53 +962,45 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             const response = await fetch(`${API_URL}/api/servers/${serverId}/start-script`);
             const data = await response.json();
-            if (response.ok) {
-                startScript = data.commands || [];
-            } else {
-                startScript = [];
-            }
+            startCommands = data.commands || [];
             renderStartScript();
         } catch (error) {
             console.error('Failed to fetch start script:', error);
-            startScript = [];
-            renderStartScript();
+            startCommandListEl.innerHTML = '<li class="list-group-item list-group-item-danger">Failed to load script</li>';
         }
     };
-    
+
+    const saveStartScript = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/start-script`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ commands: startCommands })
+            });
+            const result = await response.json();
+            if (response.ok) {
+                Swal.fire('Success', 'Start script saved!', 'success');
+            } else {
+                Swal.fire('Error', `Failed to save: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            Swal.fire('Error', `Error saving start script: ${error}`, 'error');
+        }
+    };
+
     addStartCommandBtn.addEventListener('click', () => {
         const newCommand = newStartCommandInput.value.trim();
         if (newCommand) {
-            startScript.push(newCommand);
+            startCommands.push(newCommand);
             newStartCommandInput.value = '';
             renderStartScript();
         }
     });
 
-    const saveStartScript = async () => {
-        const originalContent = saveStartScriptBtn.innerHTML;
-        saveStartScriptBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Saving...`;
-        saveStartScriptBtn.disabled = true;
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/start-script`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ commands: startScript })
-            });
-            if (!response.ok) throw new Error( (await response.json()).error || 'Failed to save script.');
-        } catch (error) {
-            Swal.fire('Error', `Error: ${error.message}`, 'error');
-        } finally {
-            saveStartScriptBtn.innerHTML = originalContent;
-            saveStartScriptBtn.disabled = false;
-        }
-    };
-
-    saveStartScriptBtn.addEventListener('click', saveStartScript);
-
-    // --- RAM Editor Logic ---
+    // --- RAM Editor ---
     const initializeRamEditor = () => {
         // Find the command that starts with 'java' or contains '-Xmx'
-        const javaCommandIndex = startScript.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
+        const javaCommandIndex = startCommands.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
 
         if (javaCommandIndex === -1) {
             ramEditorControls.classList.add('d-none');
@@ -996,7 +1009,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         
-        const command = startScript[javaCommandIndex];
+        const command = startCommands[javaCommandIndex];
         const match = command.match(/-Xmx(\d+)G/);
 
         if (match && match[1]) {
@@ -1017,26 +1030,24 @@ document.addEventListener('DOMContentLoaded', function () {
         ramSliderValue.textContent = `${ramSlider.value} GB`;
     });
 
-    saveRamBtn.addEventListener('click', async () => {
-        const javaCommandIndex = startScript.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
-        if (javaCommandIndex === -1) {
-            Swal.fire('Error', 'Could not find the Java start command to modify.', 'error');
-            return;
+    saveRamBtn.addEventListener('click', () => {
+        const newRam = ramSlider.value;
+        const javaCommandIndex = startCommands.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
+        
+        if (javaCommandIndex !== -1) {
+            // Replace existing flags
+            let command = startCommands[javaCommandIndex];
+            command = command.replace(/-Xmx\d+G/, `-Xmx${newRam}G`);
+            command = command.replace(/-Xms\d+G/, `-Xms${newRam}G`);
+            startCommands[javaCommandIndex] = command;
+        } else {
+            // Add new command if no java command exists (should be rare)
+            const newJavaCommand = `java -Xmx${newRam}G -Xms${newRam}G -jar server.jar nogui`;
+            startCommands.push(newJavaCommand);
         }
         
-        const newRam = `${ramSlider.value}G`;
-        let command = startScript[javaCommandIndex];
-        
-        // Replace both Xmx and Xms for consistency
-        command = command.replace(/-Xmx\w+/, `-Xmx${newRam}`);
-        command = command.replace(/-Xms\w+/, `-Xms${newRam}`);
-        
-        startScript[javaCommandIndex] = command;
-        
-        // Now, save the entire updated script
-        await saveStartScript();
-        // Re-render the start script display to show the change
-        renderStartScript();
+        // Save the updated script
+        saveStartScript();
     });
 
     const settingsTab = document.getElementById('settings-tab');
@@ -1413,213 +1424,33 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     };
 
-    // --- Spark Performance Monitor ---
-
-    const checkSparkStatus = async () => {
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/status`);
-            const data = await response.json();
-
-            if (data.status === 'unsupported') {
-                performanceTabItem.style.display = 'none';
-                return;
-            }
-
-            performanceTabItem.style.display = 'block';
-
-            if (data.installed) {
-                renderSparkControls(data.status);
-                fetchAndDisplaySparkReport(); // Fetch report on first load
-            } else {
-                performanceContent.innerHTML = `
-                    <div class="text-center">
-                        <h3 class="mb-3">Spark Performance Monitoring</h3>
-                        <p class="text-body-secondary">Spark is a performance profiler that can help you diagnose performance issues on your server.</p>
-                        <button id="install-spark-btn" class="btn btn-primary btn-lg">
-                            <i class="fas fa-download me-2"></i>Install Spark
-                        </button>
-                    </div>
-                `;
-                document.getElementById('install-spark-btn').addEventListener('click', installSpark);
-            }
-        } catch (error) {
-            console.error('Error checking Spark status:', error);
-            performanceContent.innerHTML = '<p class="text-danger">Could not check Spark status.</p>';
-        }
-    };
-
-    const installSpark = async () => {
-        const btn = document.getElementById('install-spark-btn');
-        btn.disabled = true;
-        btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Installing...`;
-
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/install`, { method: 'POST' });
-            const data = await response.json();
-            if (response.ok) {
-                Swal.fire({
-                    title: 'Installation Started',
-                    text: data.message,
-                    icon: 'info',
-                    customClass: { popup: 'bg-dark text-white' }
-                });
-                performanceContent.innerHTML = `
-                    <div class="text-center">
-                        <p class="text-success">Spark is being installed in the background.</p>
-                        <p class="text-body-secondary">Please restart your server for the changes to take effect.</p>
-                    </div>
-                `;
-            } else {
-                throw new Error(data.error || 'Unknown installation error');
-            }
-        } catch (error) {
-            Swal.fire({
-                title: 'Installation Failed',
-                text: error.message,
-                icon: 'error',
-                customClass: { popup: 'bg-dark text-white' }
-            });
-            btn.disabled = false;
-            btn.innerHTML = `<i class="fas fa-download me-2"></i>Install Spark`;
-        }
-    };
-
-    const renderSparkControls = (status) => {
-        let notice = '';
-        if (status === 'bundled') {
-            notice = '<p class="text-white-50 small mt-3">Spark is bundled with your server software.</p>';
+    // --- Generic Command Rendering ---
+    const renderCommands = (container, commands, addBtn, saveBtn, inputEl, callbacks) => {
+        container.innerHTML = '';
+        if (commands.length === 0) {
+            container.innerHTML = '<div class="list-group-item list-group-item-dark text-body-secondary text-center">No commands defined.</div>';
         }
 
-        performanceContent.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h3 class="mb-0">Live Performance Metrics</h3>
-                <button id="refresh-spark-report-btn" class="btn btn-sm btn-outline-primary">
-                    <i class="fas fa-sync-alt me-2"></i>Refresh
-                </button>
-            </div>
-            <div id="spark-report-container" class="p-3 rounded bg-dark-tertiary">
-                <div class="text-center p-5">
-                    <p class="text-body-secondary">Click "Refresh" to load performance data from Spark.</p>
-                </div>
-            </div>
-            ${notice}
-        `;
-
-        document.getElementById('refresh-spark-report-btn').addEventListener('click', fetchAndDisplaySparkReport);
-    };
-
-    const fetchAndDisplaySparkReport = async () => {
-        const container = document.getElementById('spark-report-container');
-        const refreshBtn = document.getElementById('refresh-spark-report-btn');
-
-        // Show loading state
-        if(refreshBtn) {
-            refreshBtn.disabled = true;
-            refreshBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Loading...`;
-        }
-        container.innerHTML = `
-            <div class="text-center p-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p class="text-body-secondary mt-3">Fetching health report from the server...</p>
-            </div>
-        `;
-
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/health-report`);
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || `HTTP error! status: ${response.status}`);
-            }
-
-            // Render the report
-            container.innerHTML = `
-                <div class="row g-4">
-                    <div class="col-md-4">
-                        <div class="card bg-dark text-white h-100">
-                            <div class="card-body text-center">
-                                <h6 class="card-subtitle mb-2 text-body-secondary">Ticks per Second (TPS)</h6>
-                                <p class="display-6">${data.tps ? data.tps.split(',')[0].trim() : 'N/A'}</p>
-                                <small class="text-white-50">5s, 10s, 1m, 5m, 15m</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card bg-dark text-white h-100">
-                            <div class="card-body text-center">
-                                <h6 class="card-subtitle mb-2 text-body-secondary">Process CPU Usage</h6>
-                                <p class="display-6">${data.cpu_process?.toFixed(1) ?? 'N/A'}%</p>
-                                <small class="text-white-50">System CPU: ${data.cpu_system?.toFixed(1) ?? 'N/A'}%</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card bg-dark text-white h-100">
-                            <div class="card-body text-center">
-                                <h6 class="card-subtitle mb-2 text-body-secondary">Heap Memory</h6>
-                                <p class="display-6">${data.heap_memory?.used ?? 'N/A'}</p>
-                                <small class="text-white-50">Total: ${data.heap_memory?.total ?? 'N/A'}</small>
-                            </div>
-                        </div>
-                    </div>
+        commands.forEach((command, index) => {
+            const commandEl = document.createElement('div');
+            commandEl.className = 'list-group-item list-group-item-dark d-flex justify-content-between align-items-center';
+            commandEl.innerHTML = `
+                <span class="command-text font-monospace">${escapeHtml(command)}</span>
+                <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-secondary move-up-btn" title="Move Up" ${index === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary move-down-btn" title="Move Down" ${index === commands.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
+                    <button class="btn btn-sm btn-outline-primary edit-cmd-btn" title="Edit Command"><i class="fas fa-pencil-alt"></i></button>
+                    <button class="btn btn-sm btn-outline-danger delete-cmd-btn" title="Delete Command"><i class="fas fa-trash"></i></button>
                 </div>
             `;
 
-        } catch (error) {
-            container.innerHTML = `
-                <div class="text-center p-5">
-                    <i class="fas fa-exclamation-triangle fa-2x text-danger mb-3"></i>
-                    <h5 class="text-danger">Failed to load report</h5>
-                    <p class="text-body-secondary">${error.message}</p>
-                </div>
-            `;
-        } finally {
-            // Restore button
-            if(refreshBtn) {
-                refreshBtn.disabled = false;
-                refreshBtn.innerHTML = `<i class="fas fa-sync-alt me-2"></i>Refresh`;
-            }
-        }
+            // Event Listeners for command actions
+            commandEl.querySelector('.move-up-btn').addEventListener('click', () => callbacks.onMove(index, index - 1));
+            commandEl.querySelector('.move-down-btn').addEventListener('click', () => callbacks.onMove(index, index + 1));
+            commandEl.querySelector('.edit-cmd-btn').addEventListener('click', () => callbacks.onEdit(index));
+            commandEl.querySelector('.delete-cmd-btn').addEventListener('click', () => callbacks.onDelete(index));
+
+            container.appendChild(commandEl);
+        });
     };
-
-    const runSparkCommand = async (command) => {
-        try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/spark/command`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: command })
-            });
-            const data = await response.json();
-            if (response.ok) {
-                Swal.fire({
-                    title: 'Command Sent',
-                    text: data.message,
-                    icon: 'success',
-                    timer: 3000,
-                    customClass: { popup: 'bg-dark text-white' }
-                });
-            } else {
-                throw new Error(data.error || `Failed to run command.`);
-            }
-        } catch (error) {
-            Swal.fire({
-                title: 'Error',
-                text: error.message,
-                icon: 'error',
-                customClass: { popup: 'bg-dark text-white' }
-            });
-        }
-    };
-
-    // Initial call to fetch data
-    fetchInstallScript();
-    fetchStartScript();
-    initializeRamEditor();
-    populateLoaders();
-    checkSparkStatus();
-
-    // Event Listeners
-    startBtn.addEventListener('click', () => handleServerAction('start'));
 });

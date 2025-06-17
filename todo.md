@@ -18,10 +18,12 @@
 - [X] add a custom made file explorer to select the path for the configs folder and the mc_servers folder you can imagine it like a remote file explorer taht shows me the folder tree of the server not from the user
 - [X] add a create server modal like the modals in detailed server view using sweetalert
 - [X] the delete server button in the index.html still opens a alert fix that so it opens a modal like in the detailed server view
-- [ ] add a perforamce monitor using spark plugin (only on server loaders that also have plugin support)
-- [ ] spark plugin automatic installation and spark plugin reapply button in the settings tab
-- [ ] more detailed command editing (command up down movement to edit the order and a edit button to edit a singel comamnd) do it for starting commands and installation commands
+- [X] automatic port checking (to make sure that a port is not assignt multiple times)
+- [X] more detailed command editing (command up down movement to edit the order and a edit button to edit a singel comamnd) do it for starting commands and installation commands
+- [ ] fix the save ram button to apply the ram settings when Xmx and or Xms is in the any starting command and apply the selected value
 - [ ] save the starting commands and the installation comamnds not in the server directory instead in the directory of the app itself and change all related code to work with the new change
 - [ ] add the ability to select any loader with any version in the settings tab of the detailed view the same method like in the dashboard
 - [ ] installation script erstellen das automatisch das web ui installiert inklusive console menu zum auswählen welche features installiert werden sollen und so weiter
 - [ ] fix server stop button
+- [ ] add a perforamce monitor using spark plugin (only on server loaders that also have plugin support)
+- [ ] spark plugin automatic installation and spark plugin reapply button in the settings tab
