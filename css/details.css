@@ -112,4 +112,14 @@
 #command-list {
     list-style-type: none;
     padding-left: 0;
+}
+
+.file-item.disabled {
+    color: #6c757d; /* Muted text color for disabled items */
+    cursor: not-allowed;
+}
+
+.file-list-container.dragover {
+    border: 2px dashed #0d6efd; /* A dashed blue border */
+    background-color: rgba(13, 110, 253, 0.1); /* A light blue background tint */
 } 

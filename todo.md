@@ -10,13 +10,16 @@
 - [X] when i delete a server also delete the saved commands from that server
 - [X] add a panel in the settings modal from the dashboard to see and manage all cureently found screens (ALL screens)
 - [X] replace every alert with its own popup modal
-- [ ] add the ability to change the minecraft server verion. for that delete the old server.jar and then download the new version server.jar
-- [ ] add the ability to uload files to the current open folder by dragging and dropping them jsut in the file explorer window or by klicking the uplaod file button and selecting them manualy
-- [ ] save the starting commands and the installation comamnds not in the server directory instead in the directory of the app itself
+- [X] add the ability to change the minecraft server verion. for that delete the old server.jar and then download the new version server.jar
+- [ ] add the ability to upload files to the currently open folder by dragging and dropping them jsut in the web browser file explorer window tab or by klicking a uplaod file button and selecting the file manualy
 - [ ] add a folder selector like the mc_servers folder selector to select a config folder where the configs (starting scripts isntallation script config.json and every other save or config file) are being saved
 - [ ] when changeing a directory path (mc_servers or configs folder) and the old one has content inside it then move all the files from the old folder to the new folder path and delete the old folder so i only have the new folder with the old files inside it
-- [ ] add a perforamce monitor using spark
-- [ ] spark systen status feature button in settings
+- [ ] add a create server modal like the modals in detailed server view
+- [ ] the delete server button in the index.html still opens a alert fix that so it opens a modal like in the detailed server view
+- [ ] fix server stop button
+- [ ] add a perforamce monitor using spark plugin
+- [ ] spark plugin automatic installation and spark plugin reapply button in the settings tab
+- [ ] save the starting commands and the installation comamnds not in the server directory instead in the directory of the app itself and change all related code to work with the new change
 - [ ] installation script erstellen das automatisch das web ui installiert inklusive console menu zum auswählen welche features installiert werden sollen und so weiter
-- [ ] add a create server modal
-- [ ] the delete server button in the index.html still opens a alert fix that
+- [ ] more detailed command editing (command up down movement to edit the order and a edit button to edit a singel comamnd) do it for starting commands and installation commands
+- [ ] dd the ability to select any loader with any version in the settings tab of the detailed view the same method like in the dashboard

@@ -123,18 +123,18 @@
                             </div>
                             <!-- File Explorer Pane -->
                             <div class="tab-pane fade" id="file-explorer-pane" role="tabpanel">
-                                <div id="file-list-view">
+                                <div id="file-explorer-view">
                                     <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <nav aria-label="breadcrumb" class="flex-grow-1">
-                                            <ol id="breadcrumb" class="breadcrumb breadcrumb-dark mb-0"></ol>
-                                        </nav>
-                                        <button id="reload-files-btn" class="btn btn-sm btn-outline-secondary" title="Reload Folder">
-                                            <i class="fas fa-sync-alt"></i>
-                                        </button>
+                                        <nav id="breadcrumb" style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"></nav>
+                                        <div>
+                                            <input type="file" id="file-upload-input" multiple style="display: none;" />
+                                            <button id="upload-btn" class="btn btn-sm btn-success me-2"><i class="fas fa-upload me-2"></i>Upload</button>
+                                            <button id="reload-files-btn" class="btn btn-sm btn-outline-secondary"><i class="fas fa-sync-alt"></i></button>
+                                        </div>
                                     </div>
-                                    <!-- Selection Action Bar -->
-                                    <div id="selection-action-bar" class="d-flex justify-content-end align-items-center gap-2 mb-2 p-2 rounded bg-dark-tertiary d-none">
-                                        <span id="selection-count" class="me-auto text-body-secondary small"></span>
+
+                                    <div id="selection-action-bar" class="d-flex justify-content-between align-items-center bg-dark-tertiary p-2 rounded mb-2 d-none">
+                                        <span id="selection-count" class="text-body-secondary small"></span>
                                         <button id="rename-btn" class="btn btn-sm btn-outline-primary" disabled><i class="fas fa-i-cursor me-1"></i>Rename</button>
                                         <button id="delete-btn" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt me-1"></i>Delete</button>
                                     </div>
@@ -197,6 +197,26 @@
                                     <p class="text-body-secondary small">Use these actions to fix common server file issues.</p>
                                     <div class="d-grid">
                                         <button id="reapply-eula-btn" class="btn btn-info"><i class="fas fa-file-signature me-2"></i>Re-apply EULA</button>
+                                    </div>
+                                </div>
+
+                                <div id="software-changer-panel" class="p-3 rounded bg-dark-tertiary mb-4">
+                                    <h3 class="h5 mb-3">Server Software</h3>
+                                    <p class="text-body-secondary small">Change the server loader and version. This is a destructive action that will replace your server.jar.</p>
+                                    <div class="input-group mb-3">
+                                        <label class="input-group-text" for="loader-select">Loader</label>
+                                        <select class="form-select" id="loader-select">
+                                            <!-- Loaders will be populated here -->
+                                        </select>
+                                    </div>
+                                    <div class="input-group mb-3">
+                                        <label class="input-group-text" for="version-select">Version</label>
+                                        <select class="form-select" id="version-select">
+                                            <!-- Versions will be populated here -->
+                                        </select>
+                                    </div>
+                                    <div class="d-grid">
+                                        <button id="change-software-btn" class="btn btn-warning"><i class="fas fa-sync-alt me-2"></i>Change Software</button>
                                     </div>
                                 </div>
 

@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const noSavedCommandsMsg = document.getElementById('no-saved-commands-msg');
     
     // File Explorer
-    const fileListView = document.getElementById('file-list-view');
+    const fileExplorerView = document.getElementById('file-explorer-view');
     const fileEditorView = document.getElementById('file-editor');
     const breadcrumbEl = document.getElementById('breadcrumb');
     const fileListContainer = document.getElementById('file-list-container');
@@ -48,6 +48,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const selectionCountEl = document.getElementById('selection-count');
     const renameBtn = document.getElementById('rename-btn');
     const deleteBtn = document.getElementById('delete-btn');
+    const uploadBtn = document.getElementById('upload-btn');
+    const fileUploadInput = document.getElementById('file-upload-input');
     
     // File Editor
     const editingFilenameEl = document.getElementById('editing-filename');
@@ -76,6 +78,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const ramHelperText = document.getElementById('ram-helper-text');
     const ramAllo = document.getElementById('ram-allocation');
     const reapplyEulaBtn = document.getElementById('reapply-eula-btn');
+
+    // Software Changer
+    const loaderSelect = document.getElementById('loader-select');
+    const versionSelect = document.getElementById('version-select');
+    const changeSoftwareBtn = document.getElementById('change-software-btn');
 
     // Java Installation
     const javaInstallPanel = document.getElementById('java-install-panel');
@@ -306,6 +313,39 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    uploadBtn.addEventListener('click', () => {
+        fileUploadInput.click();
+    });
+
+    fileUploadInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            uploadFiles(e.target.files);
+        }
+    });
+
+    // Drag and drop upload
+    fileListContainer.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fileListContainer.classList.add('dragover');
+    });
+
+    fileListContainer.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fileListContainer.classList.remove('dragover');
+    });
+
+    fileListContainer.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fileListContainer.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            uploadFiles(files);
+        }
+    });
+
     const updateSelectionActions = () => {
         const count = selectedFiles.size;
         if (count === 0) {
@@ -447,7 +487,7 @@ document.addEventListener('DOMContentLoaded', function () {
             fileContentEditor.value = data.content;
             saveFileBtn.dataset.path = filePath;
 
-            fileListView.classList.add('d-none');
+            fileExplorerView.classList.add('d-none');
             fileEditorView.classList.remove('d-none');
         } catch (error) {
             console.error('File open error:', error);
@@ -456,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const closeFileEditor = () => {
-        fileListView.classList.remove('d-none');
+        fileExplorerView.classList.remove('d-none');
         fileEditorView.classList.add('d-none');
         editingFilenameEl.textContent = '';
         fileContentEditor.value = '';
@@ -991,6 +1031,7 @@ document.addEventListener('DOMContentLoaded', function () {
         fetchStartScript().then(() => {
             initializeRamEditor();
         });
+        populateLoaders();
     });
 
     const deleteServer = async () => {
@@ -1119,6 +1160,106 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    // --- Software Changer ---
+    const populateLoaders = () => {
+        const loaders = ['vanilla', 'paper', 'purpur', 'fabric', 'forge', 'neoforge', 'quilt'];
+        loaderSelect.innerHTML = '';
+        loaders.forEach(loader => {
+            const option = document.createElement('option');
+            option.value = loader;
+            option.textContent = loader.charAt(0).toUpperCase() + loader.slice(1);
+            loaderSelect.appendChild(option);
+        });
+        // Set the initial loader from the server state and fetch versions for it.
+        loaderSelect.value = currentServerState.loader || 'vanilla';
+        fetchVersionsForLoader(loaderSelect.value);
+    };
+
+    const fetchVersionsForLoader = async (loader) => {
+        versionSelect.disabled = true;
+        versionSelect.innerHTML = '<option>Loading versions...</option>';
+        try {
+            const response = await fetch(`${API_URL}/api/loaders/${loader}/versions`);
+            const versions = await response.json();
+            if (response.ok) {
+                versionSelect.innerHTML = '';
+                versions.forEach(version => {
+                    const option = document.createElement('option');
+                    option.value = version;
+                    option.textContent = version;
+                    versionSelect.appendChild(option);
+                });
+            } else {
+                versionSelect.innerHTML = '<option>Error loading versions</option>';
+                console.error('Failed to fetch versions:', versions.error);
+            }
+        } catch (error) {
+            versionSelect.innerHTML = '<option>Error loading versions</option>';
+            console.error(`Error fetching versions for ${loader}:`, error);
+        } finally {
+            versionSelect.disabled = false;
+        }
+    };
+    
+    loaderSelect.addEventListener('change', () => {
+        const selectedLoader = loaderSelect.value;
+        fetchVersionsForLoader(selectedLoader);
+    });
+
+    const changeSoftware = async () => {
+        const selectedLoader = loaderSelect.value;
+        const selectedVersion = versionSelect.value;
+
+        if (!selectedVersion || selectedVersion === 'Error loading versions' || selectedVersion === 'Loading versions...') {
+            Swal.fire('Wait!', 'Please select a valid version.', 'info');
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: `This will replace your server.jar with ${selectedLoader} ${selectedVersion}. Make sure you have backups!`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            confirmButtonText: 'Yes, change it!'
+        });
+
+        if (result.isConfirmed) {
+            const originalContent = changeSoftwareBtn.innerHTML;
+            changeSoftwareBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Changing...`;
+            changeSoftwareBtn.disabled = true;
+            loaderSelect.disabled = true;
+            versionSelect.disabled = true;
+
+            try {
+                const response = await fetch(`${API_URL}/api/servers/${serverId}/change-software`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        loader: selectedLoader,
+                        version: selectedVersion 
+                    })
+                });
+                const res = await response.json();
+                if (response.ok) {
+                    Swal.fire('Success!', res.message, 'success');
+                    poll(); // Re-poll to get updated server details
+                } else {
+                    Swal.fire('Error', res.error, 'error');
+                }
+            } catch (error) {
+                Swal.fire('Error', `An error occurred: ${error.message}`, 'error');
+            } finally {
+                changeSoftwareBtn.innerHTML = originalContent;
+                changeSoftwareBtn.disabled = false;
+                loaderSelect.disabled = false;
+                versionSelect.disabled = false;
+            }
+        }
+    };
+
+    changeSoftwareBtn.addEventListener('click', changeSoftware);
+
     // --- Initial Load ---
     console.log(`[INIT] Initializing detail view for server: ${serverId}`);
     startPolling();
@@ -1223,4 +1364,37 @@ document.addEventListener('DOMContentLoaded', function () {
             Swal.fire('Error', `Failed to re-apply EULA: ${error.message}`, 'error');
         }
     });
+
+    const uploadFiles = async (files) => {
+        const formData = new FormData();
+        formData.append('path', currentPath);
+        for (const file of files) {
+            formData.append('files[]', file);
+        }
+
+        const originalBtnContent = uploadBtn.innerHTML;
+        uploadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Uploading...`;
+        uploadBtn.disabled = true;
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/upload`, {
+                method: 'POST',
+                body: formData,
+            });
+            const result = await response.json();
+            if (response.ok) {
+                Swal.fire('Success', result.message, 'success');
+                fetchFiles(currentPath); // Refresh the file list
+            } else {
+                throw new Error(result.error);
+            }
+        } catch (error) {
+            Swal.fire('Upload Failed', error.message, 'error');
+        } finally {
+            uploadBtn.innerHTML = originalBtnContent;
+            uploadBtn.disabled = false;
+            // Clear the file input so the 'change' event fires again for the same file
+            fileUploadInput.value = '';
+        }
+    };
 });

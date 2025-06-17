@@ -3,7 +3,7 @@ import subprocess
 import json
 import requests
 import re
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request, abort, send_from_directory
 from flask_cors import CORS
 from threading import Thread, Lock
 import time
@@ -11,6 +11,7 @@ import shutil
 import zipfile
 import collections
 import sys
+from werkzeug.utils import secure_filename
 try:
     import psutil
 except ImportError:
@@ -175,8 +176,10 @@ def get_server_details(server_name):
         'port': properties.get('port'),
         'server_type': metadata.get('server_type', 'N/A'),
         'status': 'Running' if is_server_running(server_name) else 'Stopped',
-        'eula_accepted': os.path.exists(os.path.join(server_path, 'eula.txt'))
+        'eula_accepted': os.path.exists(os.path.join(server_path, 'eula.txt')),
+        'loader': metadata.get('loader', 'vanilla')
     }
+    
     return jsonify(details)
 
 
@@ -1132,6 +1135,173 @@ def save_config():
         SERVERS_DIR = data['servers_dir']
         
         return jsonify({'message': 'Settings saved successfully.'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/minecraft/versions', methods=['GET'])
+def get_minecraft_versions():
+    try:
+        url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        response = requests.get(url)
+        response.raise_for_status()
+        manifest = response.json()
+        
+        # We're only interested in 'release' versions for stability
+        versions = [v['id'] for v in manifest['versions'] if v['type'] == 'release']
+        return jsonify(versions)
+    except requests.RequestException as e:
+        return jsonify({'error': f"Failed to fetch version manifest: {e}"}), 500
+
+@app.route('/api/loaders/<loader>/versions')
+def get_loader_versions(loader):
+    try:
+        if loader == 'vanilla':
+            url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+            response = requests.get(url)
+            response.raise_for_status()
+            manifest = response.json()
+            versions = [v['id'] for v in manifest['versions'] if v['type'] == 'release']
+            return jsonify(versions)
+        elif loader in ['paper', 'purpur']:
+            url = f"https://api.papermc.io/v2/projects/{loader}" if loader == 'paper' else f"https://api.purpurmc.org/v2/{loader}"
+            response = requests.get(url)
+            response.raise_for_status()
+            versions_data = response.json()
+            return jsonify(versions_data['versions'])
+        elif loader in ['fabric', 'quilt']:
+            # For Fabric and Quilt, we just get the main Minecraft versions they support
+            url = "https://meta.fabricmc.net/v2/versions/game"
+            response = requests.get(url)
+            response.raise_for_status()
+            # We are interested in stable releases
+            versions = [v['version'] for v in response.json() if v['stable']]
+            return jsonify(versions)
+        elif loader in ['forge', 'neoforge']:
+            # Forge/NeoForge versioning is more complex, often tied to Minecraft version.
+            # For simplicity, we'll return Minecraft versions, and fetch the latest build for it.
+             url = "https://meta.fabricmc.net/v2/versions/game"
+             response = requests.get(url)
+             response.raise_for_status()
+             versions = [v['version'] for v in response.json() if v['stable']]
+             return jsonify(versions)
+        else:
+            return jsonify({'error': 'Unsupported loader'}), 400
+    except requests.RequestException as e:
+        return jsonify({'error': f"Failed to fetch versions for {loader}: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/change-software', methods=['POST'])
+def change_server_software(server_name):
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({'error': 'Server not found'}), 404
+
+    data = request.get_json()
+    loader = data.get('loader', 'vanilla')
+    version = data.get('version')
+    if not version:
+        return jsonify({'error': 'Version not specified'}), 400
+
+    try:
+        jar_path = os.path.join(server_path, 'server.jar')
+        if os.path.exists(jar_path):
+            os.remove(jar_path)
+
+        download_url = None
+        if loader == 'vanilla':
+            manifest_url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+            manifest_res = requests.get(manifest_url)
+            manifest_res.raise_for_status()
+            manifest = manifest_res.json()
+            version_info = next((v for v in manifest['versions'] if v['id'] == version), None)
+            if not version_info:
+                return jsonify({'error': 'Specified version not found in manifest'}), 404
+            
+            version_url = version_info['url']
+            version_data_res = requests.get(version_url)
+            version_data_res.raise_for_status()
+            version_data = version_data_res.json()
+            download_url = version_data['downloads']['server']['url']
+        
+        elif loader == 'paper':
+            build_url = f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds"
+            build_res = requests.get(build_url)
+            build_res.raise_for_status()
+            latest_build = build_res.json()['builds'][-1]
+            build_number = latest_build['build']
+            jar_name = latest_build['downloads']['application']['name']
+            download_url = f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds/{build_number}/downloads/{jar_name}"
+        
+        elif loader == 'purpur':
+            build_url = f"https://api.purpurmc.org/v2/purpur/{version}"
+            build_res = requests.get(build_url)
+            build_res.raise_for_status()
+            latest_build = build_res.json()['builds']['latest']
+            download_url = f"https://api.purpurmc.org/v2/purpur/{version}/{latest_build}/download"
+
+        elif loader in ['fabric', 'quilt', 'forge', 'neoforge']:
+            # These loaders use installers, which is more complex than a simple download.
+            # For now, we'll just log that it's not a direct download.
+            # The actual installation logic for these should be a separate, more involved function.
+            print(f"Note: '{loader}' uses an installer. A simple JAR download is not sufficient.")
+            return jsonify({'error': f"'{loader}' installation via this method is not yet supported. Please create a new server for now."}), 501
+
+        if not download_url:
+            return jsonify({'error': f"Could not find a download for {loader} {version}"}), 404
+
+        download_res = requests.get(download_url, stream=True)
+        download_res.raise_for_status()
+        
+        with open(jar_path, 'wb') as f:
+            for chunk in download_res.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        metadata_path = os.path.join(server_path, '.metadata')
+        metadata = {}
+        if os.path.exists(metadata_path):
+            with open(metadata_path, 'r') as f:
+                try:
+                    metadata = json.load(f)
+                except json.JSONDecodeError:
+                    pass # Overwrite if invalid json
+        
+        metadata['version'] = version
+        metadata['loader'] = loader
+        
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
+
+        return jsonify({'message': f'Server software changed to {loader} {version} successfully.'})
+
+    except requests.RequestException as e:
+        return jsonify({'error': f"Failed to download new version: {e}"}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/servers/<server_name>/files/upload', methods=['POST'])
+def upload_files(server_name):
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+
+    path = request.form.get('path', '.')
+    destination_path = os.path.join(server_path, path)
+
+    if not os.path.isdir(destination_path):
+        return jsonify({'error': 'Destination directory does not exist'}), 400
+
+    files = request.files.getlist('files[]')
+    
+    if not files or (len(files) == 1 and files[0].filename == ''):
+        return jsonify({'error': 'No selected files'}), 400
+
+    try:
+        uploaded_count = 0
+        for file in files:
+            if file and file.filename:
+                filename = secure_filename(file.filename)
+                file.save(os.path.join(destination_path, filename))
+                uploaded_count += 1
+        return jsonify({'message': f'{uploaded_count} file(s) uploaded successfully to {path}'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
