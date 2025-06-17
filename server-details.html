@@ -11,6 +11,7 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/details.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body class="bg-dark-subtle">
 
@@ -23,7 +24,7 @@
 
         <div class="row g-4">
             <!-- Left Column -->
-            <div class="col-lg-8">
+            <div class="col-lg-12">
                 <!-- Server Details Card -->
                 <div class="card bg-dark text-white shadow mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -40,10 +41,12 @@
                             </div>
                             <div class="col-md-4 mb-3 mb-md-0">
                                 <p class="text-muted mb-1">Port</p>
-                                <h5 id="port" class="mb-0 d-flex align-items-center">
-                                    <span>N/A</span>
-                                    <i id="portIcon" class="fas fa-question-circle text-secondary ms-2"></i>
-                                </h5>
+                                <div id="port-container" class="d-flex align-items-center">
+                                    <input type="number" id="port-input" class="form-control form-control-sm bg-dark-tertiary me-2" style="width: 100px;" value="25565" disabled>
+                                    <button id="edit-port-btn" class="btn btn-sm btn-outline-secondary" title="Edit Port"><i class="fas fa-pencil-alt"></i></button>
+                                    <button id="save-port-btn" class="btn btn-sm btn-success d-none" title="Save Port"><i class="fas fa-check"></i></button>
+                                    <button id="cancel-port-btn" class="btn btn-sm btn-danger d-none ms-1" title="Cancel Edit"><i class="fas fa-times"></i></button>
+                                </div>
                             </div>
                             <div class="col-md-4 d-flex align-items-center">
                                 <div class="form-check form-switch fs-5">
@@ -129,6 +132,12 @@
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
                                     </div>
+                                    <!-- Selection Action Bar -->
+                                    <div id="selection-action-bar" class="d-flex justify-content-end align-items-center gap-2 mb-2 p-2 rounded bg-dark-tertiary d-none">
+                                        <span id="selection-count" class="me-auto text-body-secondary small"></span>
+                                        <button id="rename-btn" class="btn btn-sm btn-outline-primary" disabled><i class="fas fa-i-cursor me-1"></i>Rename</button>
+                                        <button id="delete-btn" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt me-1"></i>Delete</button>
+                                    </div>
                                     <div id="file-list-container" class="list-group list-group-dark"></div>
                                 </div>
                                 <div id="file-editor" class="d-none">
@@ -171,6 +180,26 @@
                                     </div>
                                </div>
 
+                                <div id="ram-panel" class="p-3 rounded bg-dark-tertiary mb-4">
+                                    <h3 class="h5 mb-3">RAM Allocation</h3>
+                                    <p id="ram-helper-text" class="text-body-secondary small">Adjust the memory allocated to the server. This requires -Xmx and -Xms flags in your start command.</p>
+                                    <div id="ram-editor-controls">
+                                        <label for="ram-slider" class="form-label">Max RAM: <span id="ram-slider-value" class="fw-bold">2 GB</span></label>
+                                        <input type="range" class="form-range" min="1" max="16" step="1" id="ram-slider">
+                                        <div class="d-flex justify-content-end gap-2 mt-3">
+                                            <button id="save-ram-btn" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save RAM</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="repair-panel" class="p-3 rounded bg-dark-tertiary mb-4">
+                                    <h3 class="h5 mb-3">Server Repair</h3>
+                                    <p class="text-body-secondary small">Use these actions to fix common server file issues.</p>
+                                    <div class="d-grid">
+                                        <button id="reapply-eula-btn" class="btn btn-info"><i class="fas fa-file-signature me-2"></i>Re-apply EULA</button>
+                                    </div>
+                                </div>
+
                                 <div id="java-install-panel" class="p-3 rounded bg-dark-tertiary">
                                     <h3 class="h5 mb-3">Java Installation</h3>
                                     <p class="text-body-secondary small">Install a specific version of Java for your server.</p>
@@ -195,38 +224,6 @@
                                      </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right Column -->
-            <div class="col-lg-4">
-                <div class="card bg-dark text-white shadow">
-                    <div class="card-header">
-                        <h4 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Real-Time Status</h4>
-                    </div>
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <div><i class="fas fa-users me-2 text-primary"></i> Players</div>
-                            <span id="playerCount" class="fw-bold h5 mb-0">0 / 20</span>
-                        </div>
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <div><i class="fas fa-signal me-2 text-success"></i> Ping</div>
-                            <span id="ping" class="fw-bold h5 mb-0">0 ms</span>
-                        </div>
-                        <div class="mb-3">
-                            <label for="cpuUsageBar" class="form-label">CPU Usage</label>
-                            <div class="progress" role="progressbar" style="height: 25px;">
-                                <div id="cpuUsageBar" class="progress-bar" style="width: 0%;">0%</div>
-                            </div>
-                        </div>
-                        <div>
-                            <label for="memoryUsageBar" class="form-label">Memory Usage</label>
-                            <div class="progress" role="progressbar" style="height: 25px;">
-                                <div id="memoryUsageBar" class="progress-bar bg-info" style="width: 0%;">0%</div>
-                            </div>
-                            <div id="memoryUsageText" class="text-end text-body-secondary small mt-1">0 MB / 4096 MB</div>
                         </div>
                     </div>
                 </div>

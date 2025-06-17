@@ -180,6 +180,51 @@ def get_server_details(server_name):
     return jsonify(details)
 
 
+@app.route('/api/servers/<server_name>/port', methods=['POST'])
+def update_server_port(server_name):
+    """Updates the server port in the server.properties file."""
+    server_path = os.path.join(SERVER_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+
+    data = request.get_json()
+    try:
+        new_port = int(data.get('port'))
+        if not (1024 <= new_port <= 65535):
+            raise ValueError("Port out of range")
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid port number provided. Must be a number between 1024 and 65535."}), 400
+
+    props_file = os.path.join(server_path, 'server.properties')
+    
+    try:
+        lines = []
+        port_updated = False
+        # Create file with default motd if it doesn't exist
+        if not os.path.exists(props_file):
+             with open(props_file, 'w') as f:
+                 f.write("motd=Powered by MineKeks Dashboard\n")
+                 f.write(f"server-port={new_port}\n")
+             return jsonify({"message": f"server.properties created and port set to {new_port}."})
+
+        with open(props_file, 'r') as f:
+            lines = f.readlines()
+
+        with open(props_file, 'w') as f:
+            for line in lines:
+                if line.strip().startswith('server-port='):
+                    f.write(f"server-port={new_port}\n")
+                    port_updated = True
+                else:
+                    f.write(line)
+            
+            if not port_updated:
+                f.write(f"\nserver-port={new_port}\n")
+
+        return jsonify({"message": f"Server port updated to {new_port}."}), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to update server.properties: {e}"}), 500
+
 
 @app.route('/api/servers', methods=['GET', 'POST'])
 def handle_servers():
@@ -346,11 +391,21 @@ def list_files(server_name):
     items = []
     for item_name in sorted(os.listdir(safe_path)):
         item_path = os.path.join(safe_path, item_name)
-        items.append({
+        is_dir = os.path.isdir(item_path)
+        item_details = {
             'name': item_name,
             'path': os.path.join(relative_path, item_name).replace('\\', '/'),
-            'is_directory': os.path.isdir(item_path)
-        })
+            'is_directory': is_dir
+        }
+        if not is_dir:
+            try:
+                # Get file size in bytes
+                item_details['size'] = os.path.getsize(item_path)
+            except OSError:
+                # If size can't be read, default to 0
+                item_details['size'] = 0
+        
+        items.append(item_details)
     return jsonify(items)
 
 @app.route('/api/servers/<server_name>/files/content', methods=['GET', 'POST'])
@@ -928,6 +983,90 @@ def stop_server(server_name):
     except Exception as e:
         print(f"ERROR [{server_name}]: An unexpected error occurred while trying to stop the server: {e}")
         return {'error': f'Failed to stop server: {e}'}, 500
+
+@app.route('/api/servers/<server_name>/files/delete', methods=['POST'])
+def delete_files(server_name):
+    """Deletes a list of files and/or folders."""
+    server_path = os.path.join(SERVER_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+
+    data = request.get_json()
+    paths_to_delete = data.get('paths', [])
+    if not paths_to_delete:
+        return jsonify({"error": "No paths provided for deletion"}), 400
+
+    errors = []
+    success_count = 0
+    for relative_path in paths_to_delete:
+        try:
+            safe_path = sanitize_path(server_path, relative_path)
+            if os.path.exists(safe_path):
+                if os.path.isdir(safe_path):
+                    shutil.rmtree(safe_path)
+                else:
+                    os.remove(safe_path)
+                success_count += 1
+            else:
+                errors.append(f"Path not found: {relative_path}")
+        except Exception as e:
+            errors.append(f"Could not delete {relative_path}: {e}")
+
+    if errors:
+        return jsonify({
+            "error": f"Completed with {len(errors)} errors.",
+            "details": errors,
+            "success_count": success_count
+        }), 500
+    
+    return jsonify({"message": f"Successfully deleted {success_count} items."})
+
+@app.route('/api/servers/<server_name>/files/rename', methods=['POST'])
+def rename_file(server_name):
+    """Renames a file or folder."""
+    server_path = os.path.join(SERVER_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+        
+    data = request.get_json()
+    relative_path = data.get('path')
+    new_name = data.get('new_name')
+
+    if not all([relative_path, new_name]):
+        return jsonify({"error": "Both 'path' and 'new_name' are required."}), 400
+
+    if '/' in new_name or '\\' in new_name or '..' in new_name:
+        return jsonify({"error": "Invalid characters in new name."}), 400
+        
+    try:
+        old_safe_path = sanitize_path(server_path, relative_path)
+        if not os.path.exists(old_safe_path):
+            return jsonify({"error": "File or folder not found."}), 404
+            
+        new_safe_path = os.path.join(os.path.dirname(old_safe_path), new_name)
+        
+        if os.path.exists(new_safe_path):
+            return jsonify({"error": "A file or folder with that name already exists."}), 409
+            
+        os.rename(old_safe_path, new_safe_path)
+        return jsonify({"message": "Renamed successfully."})
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to rename: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/reapply-eula', methods=['POST'])
+def reapply_eula(server_name):
+    server_path = os.path.join(SERVER_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        eula_path = os.path.join(server_path, 'eula.txt')
+        with open(eula_path, 'w') as f:
+            f.write('eula=true\n')
+        return jsonify({'message': 'EULA re-applied successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000) 

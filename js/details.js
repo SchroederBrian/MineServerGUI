@@ -11,8 +11,10 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- DOM Elements ---
     const serverNameEl = document.getElementById('serverName');
     const minecraftVersionEl = document.getElementById('minecraftVersion');
-    const portEl = document.getElementById('port').querySelector('span');
-    const portIconEl = document.getElementById('portIcon');
+    const portInput = document.getElementById('port-input');
+    const editPortBtn = document.getElementById('edit-port-btn');
+    const savePortBtn = document.getElementById('save-port-btn');
+    const cancelPortBtn = document.getElementById('cancel-port-btn');
     const eulaCheckbox = document.getElementById('eula');
     const statusTextEl = document.getElementById('statusText');
 
@@ -42,6 +44,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const breadcrumbEl = document.getElementById('breadcrumb');
     const fileListContainer = document.getElementById('file-list-container');
     const reloadFilesBtn = document.getElementById('reload-files-btn');
+    const selectionActionBar = document.getElementById('selection-action-bar');
+    const selectionCountEl = document.getElementById('selection-count');
+    const renameBtn = document.getElementById('rename-btn');
+    const deleteBtn = document.getElementById('delete-btn');
     
     // File Editor
     const editingFilenameEl = document.getElementById('editing-filename');
@@ -62,7 +68,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const addStartCommandBtn = document.getElementById('add-start-command-btn');
     const saveStartScriptBtn = document.getElementById('save-start-script-btn');
 
+    // RAM Editor
+    const ramEditorControls = document.getElementById('ram-editor-controls');
+    const ramSlider = document.getElementById('ram-slider');
+    const ramSliderValue = document.getElementById('ram-slider-value');
+    const saveRamBtn = document.getElementById('save-ram-btn');
+    const ramHelperText = document.getElementById('ram-helper-text');
+    const ramAllo = document.getElementById('ram-allocation');
+    const reapplyEulaBtn = document.getElementById('reapply-eula-btn');
+
     // Java Installation
+    const javaInstallPanel = document.getElementById('java-install-panel');
     const javaVersionSelect = document.getElementById('java-version-select');
     const installJavaBtn = document.getElementById('install-java-btn');
 
@@ -70,6 +86,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const deleteServerBtn = document.getElementById('delete-server-btn');
 
     let currentPath = '.';
+    let selectedFiles = new Set();
     let currentLogLine = 0;
     let isLogAutoscrollEnabled = true;
     let currentServerState = {};
@@ -119,16 +136,10 @@ document.addEventListener('DOMContentLoaded', function () {
             
             if (details.status === 'Running') {
                 const statusResponse = await fetch(`${API_URL}/api/servers/${serverId}/status`);
-                const statusData = await statusResponse.json();
-                updateUIMetrics(statusData);
+                // We still fetch status but no longer update UI with it.
+                // This could be used for other things in the future.
             } else {
-                // If stopped, reset metrics and clear the log line count
-                // so we get a fresh log on the next start.
-                resetMetrics();
-                if (currentLogLine !== 0) {
-                    logOutputEl.innerHTML = '<p class="text-body-secondary">[Server has stopped]</p>';
-                    currentLogLine = 0;
-                }
+                // If stopped, reset metrics. The log will persist until the next start.
             }
             
             // Fetch logs only if auto-scrolling is enabled.
@@ -160,11 +171,9 @@ document.addEventListener('DOMContentLoaded', function () {
         document.title = `${data.name} - Details`;
         serverNameEl.textContent = data.name;
         minecraftVersionEl.textContent = data.version || 'N/A';
-        portEl.textContent = data.port;
-        portIconEl.className = data.port == 25565 
-            ? 'fas fa-check-circle text-success ms-2' 
-            : 'fas fa-exclamation-triangle text-warning ms-2';
-        portIconEl.title = data.port == 25565 ? 'Standard Port' : 'Non-standard Port';
+        if (portInput.disabled) {
+            portInput.value = data.port;
+        }
         eulaCheckbox.checked = data.eula_accepted;
 
         // Update status indicator
@@ -244,6 +253,12 @@ document.addEventListener('DOMContentLoaded', function () {
         const btn = btnMap[action];
         if (!btn) return;
 
+        // When starting, clear the old logs from the view for a fresh start.
+        if (action === 'start') {
+            logOutputEl.innerHTML = '<p class="text-body-secondary">[Starting server...]</p>';
+            currentLogLine = 0;
+        }
+
         console.log(`[ACTION] User triggered '${action}' for server '${serverId}'.`);
         const originalContent = btn.innerHTML;
         const actionText = action.charAt(0).toUpperCase() + action.slice(1);
@@ -264,7 +279,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         } catch (error) {
             console.error(`[CLIENT ERROR] Error during '${action}' action:`, error);
-            alert(`Error: ${error.message}`);
+            Swal.fire({
+                icon: 'error',
+                title: `Failed to ${action} server`,
+                text: error.message,
+            });
         } finally {
             // The action is complete (success or failure), so restore the button's original content.
             btn.innerHTML = originalContent;
@@ -287,7 +306,31 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    const updateSelectionActions = () => {
+        const count = selectedFiles.size;
+        if (count === 0) {
+            selectionActionBar.classList.add('d-none');
+            return;
+        }
+        
+        selectionActionBar.classList.remove('d-none');
+        selectionCountEl.textContent = `${count} item${count > 1 ? 's' : ''} selected`;
+        renameBtn.disabled = count !== 1;
+    };
+
+    const formatFileSize = (bytes) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
     const fetchFiles = async (path) => {
+        // When fetching files, always clear the previous selection
+        selectedFiles.clear();
+        updateSelectionActions();
+
         try {
             const response = await fetch(`${API_URL}/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`);
             if (!response.ok) throw new Error('Failed to fetch files');
@@ -322,23 +365,23 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         files.forEach(file => {
-            const fileItem = document.createElement('a');
-            fileItem.href = '#';
-            fileItem.className = 'list-group-item list-group-item-action list-group-item-dark d-flex justify-content-between align-items-center';
-            const icon = file.is_directory ? 'fa-folder text-warning' : 'fa-file-alt text-light';
+            const fileItem = document.createElement('div');
+            fileItem.className = 'list-group-item list-group-item-action list-group-item-dark d-flex align-items-center file-item';
             
+            const icon = file.is_directory ? 'fa-folder text-warning' : 'fa-file-alt text-light';
             const isBinary = /\.(jar|zip|exe|dll|dat|png|jpg|jpeg|gif|bmp|so|a|class|lock)$/i.test(file.name);
-
+            
             fileItem.innerHTML = `
-                <div>
-                    <i class="fas ${icon} fa-fw me-3"></i>
-                    ${file.name}
-                </div>
-                <small class="text-body-secondary">${file.is_directory ? '' : `${(file.size / 1024).toFixed(2)} KB`}</small>
+                <input type="checkbox" class="form-check-input me-3" data-path="${file.path}">
+                <i class="fas ${icon} fa-fw me-3"></i>
+                <span class="file-name flex-grow-1">${file.name}</span>
+                <small class="text-body-secondary me-2">${file.is_directory ? '' : formatFileSize(file.size)}</small>
             `;
-            fileItem.onclick = (e) => {
-                e.preventDefault();
-                if (fileItem.classList.contains('disabled')) return;
+            
+            // Handle clicking on the file name to open/navigate
+            fileItem.querySelector('.file-name').addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent checkbox from toggling
+                 if (fileItem.classList.contains('disabled')) return;
 
                 const newPath = `${path}/${file.name}`.replace('./', '');
                 if (file.is_directory) {
@@ -346,7 +389,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     openFileEditor(newPath);
                 }
-            };
+            });
+
+            const checkbox = fileItem.querySelector('input[type="checkbox"]');
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    selectedFiles.add(file.path);
+                } else {
+                    selectedFiles.delete(file.path);
+                }
+                updateSelectionActions();
+            });
 
             if (!file.is_directory && isBinary) {
                 fileItem.classList.add('disabled');
@@ -398,7 +451,7 @@ document.addEventListener('DOMContentLoaded', function () {
             fileEditorView.classList.remove('d-none');
         } catch (error) {
             console.error('File open error:', error);
-            alert(`Error opening file: ${error.message}`);
+            Swal.fire('Error', `Error opening file: ${error.message}`, 'error');
         }
     };
 
@@ -413,13 +466,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const saveFile = async () => {
         saveFileBtn.disabled = true;
         saveFileBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+        const path = saveFileBtn.dataset.path;
 
         try {
+            if (!path) {
+                throw new Error("No file path specified for saving.");
+            }
             const response = await fetch(`${API_URL}/api/servers/${serverId}/files/content`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    path: currentFile.path,
+                    path: path,
                     content: fileContentEditor.value
                 }),
             });
@@ -427,11 +484,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 const err = await response.json();
                 throw new Error(err.error || "Failed to save file.");
             }
-            alert('File saved successfully!');
+            Swal.fire({
+                title: 'Success!',
+                text: 'File saved successfully!',
+                icon: 'success',
+                timer: 1500,
+                showConfirmButton: false,
+            });
             closeFileEditor();
         } catch (error) {
             console.error('Save error:', error);
-            alert(`Error saving file: ${error.message}`);
+            Swal.fire('Error', `Error saving file: ${error.message}`, 'error');
         } finally {
             saveFileBtn.disabled = false;
             saveFileBtn.innerHTML = '<i class="fas fa-save me-2"></i>Save';
@@ -477,7 +540,17 @@ document.addEventListener('DOMContentLoaded', function () {
     };
     
     const clearLogs = async () => {
-        if (!confirm('Are you sure you want to clear all logs?')) {
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: "You are about to clear all logs. This cannot be undone.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'Yes, clear them!'
+        });
+
+        if (!result.isConfirmed) {
             return;
         }
         
@@ -501,7 +574,7 @@ document.addEventListener('DOMContentLoaded', function () {
             
         } catch (error) {
             console.error('Error clearing logs:', error);
-            alert(`Error: ${error.message}`);
+            Swal.fire('Error', `Error: ${error.message}`, 'error');
         } finally {
             clearLogsBtn.innerHTML = originalContent;
             clearLogsBtn.disabled = false;
@@ -581,12 +654,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const saveCommand = () => {
         const command = consoleInputEl.value.trim();
         if (!command) {
-            alert('Please enter a command to save');
+            Swal.fire('Hold up!', 'Please enter a command to save.', 'info');
             return;
         }
         
         if (savedCommands.includes(command)) {
-            alert('This command is already saved');
+            Swal.fire('Heads up!', 'This command is already saved.', 'info');
             return;
         }
         
@@ -697,7 +770,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!response.ok) throw new Error( (await response.json()).error || 'Failed to save script.');
             // Maybe add a temporary "Saved!" message
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            Swal.fire('Error', `Error: ${error.message}`, 'error');
         } finally {
             saveScriptBtn.innerHTML = originalContent;
             saveScriptBtn.disabled = false;
@@ -717,7 +790,16 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const runInstallation = async () => {
-        if (!confirm('Are you sure you want to run the installation script? This may modify server files.')) {
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: "This will run the installation script and may modify server files.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, run it!',
+            cancelButtonText: 'Cancel'
+        });
+
+        if (!result.isConfirmed) {
             return;
         }
         
@@ -733,16 +815,25 @@ document.addEventListener('DOMContentLoaded', function () {
             
             // The output will now appear in the logs tab automatically.
             // No need to poll a separate endpoint.
-            alert(data.message);
+            Swal.fire('Success', data.message, 'success');
 
         } catch (error) {
-             alert(`[INSTALLATION FAILED TO START] ${error.message}`);
+             Swal.fire('Error', `[INSTALLATION FAILED TO START] ${error.message}`, 'error');
         }
     };
 
     const installJava = async () => {
         const javaVersion = javaVersionSelect.value;
-        if (!confirm(`Are you sure you want to install Java version ${javaVersion}? This will download and extract the JDK.`)) {
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: `This will install Java version ${javaVersion} and may take some time.`,
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, install it!',
+            cancelButtonText: 'Cancel'
+        });
+
+        if (!result.isConfirmed) {
             return;
         }
 
@@ -760,10 +851,10 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!response.ok) throw new Error(data.error || 'Failed to start Java installation.');
             
             // The output will now appear in the logs tab automatically.
-            alert(data.message);
+            Swal.fire('Success', data.message, 'success');
 
         } catch (error) {
-             alert(`[JAVA INSTALLATION FAILED TO START] ${error.message}`);
+             Swal.fire('Error', `[JAVA INSTALLATION FAILED TO START] ${error.message}`, 'error');
         }
     };
     
@@ -829,7 +920,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             if (!response.ok) throw new Error( (await response.json()).error || 'Failed to save script.');
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            Swal.fire('Error', `Error: ${error.message}`, 'error');
         } finally {
             saveStartScriptBtn.innerHTML = originalContent;
             saveStartScriptBtn.disabled = false;
@@ -838,15 +929,82 @@ document.addEventListener('DOMContentLoaded', function () {
 
     saveStartScriptBtn.addEventListener('click', saveStartScript);
 
+    // --- RAM Editor Logic ---
+    const initializeRamEditor = () => {
+        // Find the command that starts with 'java' or contains '-Xmx'
+        const javaCommandIndex = startScript.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
+
+        if (javaCommandIndex === -1) {
+            ramEditorControls.classList.add('d-none');
+            ramHelperText.textContent = 'Could not find a valid Java start command with -Xmx flag in your script. RAM editor is disabled.';
+            ramHelperText.classList.add('text-warning');
+            return;
+        }
+        
+        const command = startScript[javaCommandIndex];
+        const match = command.match(/-Xmx(\d+)G/);
+
+        if (match && match[1]) {
+            const currentRam = parseInt(match[1], 10);
+            ramSlider.value = currentRam;
+            ramSliderValue.textContent = `${currentRam} GB`;
+            ramEditorControls.classList.remove('d-none');
+            ramHelperText.textContent = 'Adjust the memory allocated to the server. This requires -Xmx and -Xms flags in your start command.';
+            ramHelperText.classList.remove('text-warning');
+        } else {
+            ramEditorControls.classList.add('d-none');
+            ramHelperText.textContent = 'Could not parse RAM value from your start script (e.g., -Xmx4G). RAM editor is disabled.';
+            ramHelperText.classList.add('text-warning');
+        }
+    };
+
+    ramSlider.addEventListener('input', () => {
+        ramSliderValue.textContent = `${ramSlider.value} GB`;
+    });
+
+    saveRamBtn.addEventListener('click', async () => {
+        const javaCommandIndex = startScript.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
+        if (javaCommandIndex === -1) {
+            Swal.fire('Error', 'Could not find the Java start command to modify.', 'error');
+            return;
+        }
+        
+        const newRam = `${ramSlider.value}G`;
+        let command = startScript[javaCommandIndex];
+        
+        // Replace both Xmx and Xms for consistency
+        command = command.replace(/-Xmx\w+/, `-Xmx${newRam}`);
+        command = command.replace(/-Xms\w+/, `-Xms${newRam}`);
+        
+        startScript[javaCommandIndex] = command;
+        
+        // Now, save the entire updated script
+        await saveStartScript();
+        // Re-render the start script display to show the change
+        renderStartScript();
+    });
+
     const settingsTab = document.getElementById('settings-tab');
 
     settingsTab.addEventListener('shown.bs.tab', function () {
         fetchInstallScript();
-        fetchStartScript();
+        fetchStartScript().then(() => {
+            initializeRamEditor();
+        });
     });
 
     const deleteServer = async () => {
-        if (!confirm(`Are you sure you want to permanently delete this server? This action cannot be undone.`)) {
+        const result = await Swal.fire({
+            title: 'Are you absolutely sure?',
+            text: "This action cannot be undone. All server data will be permanently deleted.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'Yes, delete it!'
+        });
+
+        if (!result.isConfirmed) {
             return;
         }
 
@@ -864,11 +1022,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(errorData.error || 'Failed to delete server.');
             }
 
-            alert('Server deleted successfully. Returning to dashboard.');
+            await Swal.fire(
+                'Deleted!',
+                'Server has been deleted.',
+                'success'
+            );
             window.location.href = 'index.html';
 
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            Swal.fire('Error', `Error: ${error.message}`, 'error');
             deleteServerBtn.innerHTML = originalContent;
             deleteServerBtn.disabled = false;
         }
@@ -901,6 +1063,57 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    // --- Port Editing ---
+    const togglePortEditMode = (isEditing) => {
+        portInput.disabled = !isEditing;
+        editPortBtn.classList.toggle('d-none', isEditing);
+        savePortBtn.classList.toggle('d-none', !isEditing);
+        cancelPortBtn.classList.toggle('d-none', !isEditing);
+    };
+
+    editPortBtn.addEventListener('click', () => togglePortEditMode(true));
+
+    cancelPortBtn.addEventListener('click', () => {
+        portInput.value = currentServerState.port; // Restore original value
+        togglePortEditMode(false);
+    });
+
+    savePortBtn.addEventListener('click', async () => {
+        const newPort = parseInt(portInput.value, 10);
+        if (isNaN(newPort) || newPort < 1024 || newPort > 65535) {
+            Swal.fire('Invalid Port', 'Please enter a valid port number (1024-65535).', 'warning');
+            return;
+        }
+
+        savePortBtn.disabled = true;
+        savePortBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/port`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ port: newPort })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to save port.');
+            }
+            
+            // Success, update state and UI
+            currentServerState.port = newPort;
+            togglePortEditMode(false);
+            poll(); // Re-poll to get fresh server data confirmed from backend
+
+        } catch (error) {
+            Swal.fire('Error', `Error: ${error.message}`, 'error');
+            portInput.value = currentServerState.port; // Revert on failure
+        } finally {
+            savePortBtn.disabled = false;
+            savePortBtn.innerHTML = '<i class="fas fa-check"></i>';
+        }
+    });
+
     // --- Initial Load ---
     console.log(`[INIT] Initializing detail view for server: ${serverId}`);
     startPolling();
@@ -909,4 +1122,100 @@ document.addEventListener('DOMContentLoaded', function () {
     fetchStartScript();
     loadSavedCommands();
     loadLogSettings();
-}); 
+
+    deleteBtn.addEventListener('click', async () => {
+        const count = selectedFiles.size;
+        if (count === 0) return;
+
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: `You are about to delete ${count} item${count > 1 ? 's' : ''}. This cannot be undone.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, delete them!'
+        });
+
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: Array.from(selectedFiles) })
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to delete items.');
+
+            Swal.fire('Deleted!', data.message, 'success');
+        } catch (error) {
+            Swal.fire('Error', `Error deleting files: ${error.message}`, 'error');
+        } finally {
+            fetchFiles(currentPath); // Refresh file list
+        }
+    });
+
+    renameBtn.addEventListener('click', async () => {
+        if (selectedFiles.size !== 1) return;
+        
+        const oldPath = Array.from(selectedFiles)[0];
+        const oldName = oldPath.split('/').pop();
+        
+        const { value: newName } = await Swal.fire({
+            title: 'Rename Item',
+            input: 'text',
+            inputValue: oldName,
+            showCancelButton: true,
+            inputValidator: (value) => {
+                if (!value || value.trim() === '') {
+                    return 'Name cannot be empty!';
+                }
+            }
+        });
+
+        if (!newName || newName.trim() === '' || newName.trim() === oldName) {
+            return; // User cancelled or entered the same name
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: oldPath, new_name: newName.trim() })
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to rename item.');
+
+        } catch (error) {
+            Swal.fire('Error', `Error renaming file: ${error.message}`, 'error');
+        } finally {
+            fetchFiles(currentPath); // Refresh file list
+        }
+    });
+
+    reapplyEulaBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/reapply-eula`, {
+                method: 'POST',
+            });
+            const result = await response.json();
+            if (response.ok) {
+                Swal.fire({
+                    title: 'Success!',
+                    text: result.message,
+                    icon: 'success',
+                    timer: 2000,
+                    showConfirmButton: false,
+                });
+                poll(); // Refresh details by polling
+            } else {
+                throw new Error(result.error);
+            }
+        } catch (error) {
+            Swal.fire('Error', `Failed to re-apply EULA: ${error.message}`, 'error');
+        }
+    });
+});
