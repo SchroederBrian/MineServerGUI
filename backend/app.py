@@ -283,7 +283,7 @@ def handle_servers():
         
         if is_port_in_use(port):
             return jsonify({"error": f"Port {port} is already in use."}), 409
-
+        
         server_path = os.path.join(SERVERS_DIR, server_name)
         if os.path.exists(server_path):
             return jsonify({'error': 'A server with this name already exists'}), 409
@@ -382,17 +382,17 @@ def clear_logs(server_name):
         # Clear the log file by opening it in write mode
         with open(log_file_path, 'w') as f:
             f.write("[Logs cleared]\n")
-            
+
         # If the server is running, also send a command to clear the screen
-        if is_server_running(server_name):
-            screen_session_name = get_screen_session_name(server_name)
-            base_command = ['wsl'] if sys.platform == "win32" else []
-            clear_cmd = base_command + ['screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', "clear\n"]
-            try:
-                subprocess.run(clear_cmd, check=True)
-            except Exception as e:
-                print(f"Error clearing screen: {e}")
-                # Continue even if screen clear fails
+        ##if is_server_running(server_name):
+        ##    screen_session_name = get_screen_session_name(server_name)
+        ##    base_command = ['wsl'] if sys.platform == "win32" else []
+        ##    clear_cmd = base_command + ['screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', "clear\n"]
+        ##    try:
+        ##        subprocess.run(clear_cmd, check=True)
+        ##    except Exception as e:
+        ##        print(f"Error clearing screen: {e}")
+        ##        # Continue even if screen clear fails
                 
         return jsonify({"message": "Logs cleared successfully"}), 200
     except Exception as e:

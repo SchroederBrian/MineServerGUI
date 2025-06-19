@@ -557,6 +557,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Logs & Console ---
 
+    const cleanLogLine = (line) => {
+        // This regex strips ANSI escape codes (e.g., color codes, cursor movement)
+        const ansiRegex = /[\u001B\u009B][[()#;?]*.{0,6}(?:(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g;
+        let cleanedLine = line.replace(ansiRegex, '');
+        
+        // Handle carriage returns by taking only the last part of a line,
+        // which is useful for overwriting lines like progress bars.
+        if (cleanedLine.includes('\r')) {
+            cleanedLine = cleanedLine.split('\r').pop();
+        }
+
+        return cleanedLine;
+    };
+
     const fetchLogs = async () => {
         try {
             const response = await fetch(`${API_URL}/api/servers/${serverId}/log?since=${currentLogLine}`);
@@ -572,9 +586,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     logOutputEl.innerHTML = '';
                 }
                 data.lines.forEach(line => {
+                    const cleanedLine = cleanLogLine(line);
+                    // Don't render empty lines or standalone console prompts
+                    if (cleanedLine.trim() === '' || cleanedLine.trim() === '>') {
+                        return;
+                    }
                     const p = document.createElement('p');
-                    p.className = 'm-0';
-                    p.textContent = line.trim(); // Use trim to remove trailing newlines from the server
+                    p.textContent = cleanedLine;
                     logOutputEl.appendChild(p);
                 });
                 // Auto-scroll to the bottom
@@ -584,9 +602,7 @@ document.addEventListener('DOMContentLoaded', function () {
             currentLogLine = data.line_count;
 
         } catch (error) {
-            // Don't spam the log on errors, just ensure there's a message.
-            if (logOutputEl.innerHTML.includes('Could not fetch')) return;
-            logOutputEl.innerHTML = `<p class="text-danger m-0">[Could not fetch server logs: ${error.message}]</p>`;
+            console.warn('Failed to fetch logs:', error);
         }
     };
     
@@ -999,30 +1015,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- RAM Editor ---
     const initializeRamEditor = () => {
-        // Find the command that starts with 'java' or contains '-Xmx'
-        const javaCommandIndex = startCommands.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
+        const javaCommandIndex = startCommands.findIndex(cmd => cmd.includes('java') && cmd.includes('.jar'));
 
         if (javaCommandIndex === -1) {
-            ramEditorControls.classList.add('d-none');
-            ramHelperText.textContent = 'Could not find a valid Java start command with -Xmx flag in your script. RAM editor is disabled.';
-            ramHelperText.classList.add('text-warning');
+            ramHelperText.textContent = 'No compatible Java start command found. Add one with e.g., "java -jar server.jar" to manage RAM.';
+            ramEditorControls.style.display = 'none';
             return;
         }
-        
-        const command = startCommands[javaCommandIndex];
-        const match = command.match(/-Xmx(\d+)G/);
 
-        if (match && match[1]) {
-            const currentRam = parseInt(match[1], 10);
-            ramSlider.value = currentRam;
-            ramSliderValue.textContent = `${currentRam} GB`;
-            ramEditorControls.classList.remove('d-none');
-            ramHelperText.textContent = 'Adjust the memory allocated to the server. This requires -Xmx and -Xms flags in your start command.';
-            ramHelperText.classList.remove('text-warning');
+        ramEditorControls.style.display = 'block';
+        const command = startCommands[javaCommandIndex];
+        const ramMatch = command.match(/-Xmx(\d+)([GgMm])?/i);
+
+        if (ramMatch && ramMatch[1]) {
+            let ramValue = parseInt(ramMatch[1], 10);
+            const unit = ramMatch[2] ? ramMatch[2].toUpperCase() : 'G';
+            if (unit === 'M') {
+                ramValue = Math.round(ramValue / 1024);
+            }
+            ramSlider.value = ramValue;
+            ramSliderValue.textContent = `${ramValue} GB`;
+            ramHelperText.textContent = 'Adjust the memory allocated to the server. Your start command will be updated.';
         } else {
-            ramEditorControls.classList.add('d-none');
-            ramHelperText.textContent = 'Could not parse RAM value from your start script (e.g., -Xmx4G). RAM editor is disabled.';
-            ramHelperText.classList.add('text-warning');
+            ramHelperText.textContent = 'Could not read current RAM value. Set a new one below.';
+            ramSlider.value = 2; // Default to 2GB
+            ramSliderValue.textContent = '2 GB';
         }
     };
 
@@ -1031,23 +1048,46 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     saveRamBtn.addEventListener('click', () => {
-        const newRam = ramSlider.value;
-        const javaCommandIndex = startCommands.findIndex(cmd => cmd.includes('java') && cmd.includes('-Xmx'));
-        
-        if (javaCommandIndex !== -1) {
-            // Replace existing flags
-            let command = startCommands[javaCommandIndex];
-            command = command.replace(/-Xmx\d+G/, `-Xmx${newRam}G`);
-            command = command.replace(/-Xms\d+G/, `-Xms${newRam}G`);
-            startCommands[javaCommandIndex] = command;
-        } else {
-            // Add new command if no java command exists (should be rare)
-            const newJavaCommand = `java -Xmx${newRam}G -Xms${newRam}G -jar server.jar nogui`;
-            startCommands.push(newJavaCommand);
+        const newRam = `${ramSlider.value}G`;
+        const javaCommandIndex = startCommands.findIndex(cmd => cmd.includes('java') && cmd.includes('.jar'));
+
+        if (javaCommandIndex === -1) {
+            Swal.fire({
+                title: 'Command Not Found',
+                text: 'Could not find a Java start command to modify.',
+                icon: 'error',
+                customClass: { popup: 'bg-dark text-white' }
+            });
+            return;
         }
-        
-        // Save the updated script
+
+        let command = startCommands[javaCommandIndex];
+        const hasXmx = /-Xmx\w+/.test(command);
+        const hasXms = /-Xms\w+/.test(command);
+
+        if (hasXmx) {
+            command = command.replace(/-Xmx\w+/, `-Xmx${newRam}`);
+        } else {
+            command = command.replace(/java(?=\s)/, `java -Xmx${newRam}`);
+        }
+
+        if (hasXms) {
+            command = command.replace(/-Xms\w+/, `-Xms${newRam}`);
+        } else {
+            command = command.replace(/(-Xmx\w+)/, `-Xms${newRam} $1`);
+        }
+
+        startCommands[javaCommandIndex] = command;
         saveStartScript();
+        renderStartScript();
+        Swal.fire({
+            title: 'Success!',
+            text: 'RAM settings have been updated in your start script.',
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false,
+            customClass: { popup: 'bg-dark text-white' }
+        });
     });
 
     const settingsTab = document.getElementById('settings-tab');

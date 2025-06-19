@@ -138,27 +138,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         Swal.showLoading();
                     }
                 });
-
-                try {
-                    const response = await fetch(`${API_URL}/api/servers`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(serverData)
-                    });
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(serverData)
+            });
                     const res = await response.json();
-                    if (!response.ok) {
+            if (!response.ok) {
                         throw new Error(res.error || 'Server creation failed');
-                    }
-                    await fetchServers();
+            }
+            await fetchServers();
                      Swal.fire('Success!', 'Server created successfully!', 'success');
-                } catch (error) {
-                    console.error('Error creating server:', error);
+        } catch (error) {
+            console.error('Error creating server:', error);
                     Swal.fire('Error!', `Error creating server: ${error.message}`, 'error');
-                }
+        }
             }
         });
     });
-
+    
     // Use event delegation for start/stop buttons and card clicks
     serverListElement.addEventListener('click', async (e) => {
         const button = e.target.closest('button');
@@ -194,29 +194,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }).then(async (result) => {
                 if (result.isConfirmed) {
-                    try {
-                        const response = await fetch(`${API_URL}/api/servers/${serverId}`, { method: 'DELETE' });
-                        if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.error || 'Failed to delete server');
-                        }
-                        await fetchServers(); // Refresh the list
+                try {
+                    const response = await fetch(`${API_URL}/api/servers/${serverId}`, { method: 'DELETE' });
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Failed to delete server');
+                    }
+                    await fetchServers(); // Refresh the list
                         Swal.fire({
                            title: 'Deleted!',
                            text: `Server "${serverId}" has been deleted.`,
                            icon: 'success',
                            customClass: { popup: 'bg-dark text-white' }
                         });
-                    } catch (error) {
-                        console.error('Error deleting server:', error);
+                } catch (error) {
+                    console.error('Error deleting server:', error);
                         Swal.fire({
                            title: 'Error!',
                            text: `Failed to delete server: ${error.message}`,
                            icon: 'error',
                            customClass: { popup: 'bg-dark text-white' }
                         });
-                    }
                 }
+            }
             });
             return;
         }
