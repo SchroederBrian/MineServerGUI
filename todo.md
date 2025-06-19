@@ -31,7 +31,7 @@
 - [ ] add a "Player Manager" tab (or a section in settings). It would have two lists: Whitelisted Players and Banned Players. The user could easily add a player by username or remove them with a click of a button, with the backend handling the JSON file updates.
 - [ ] add a "World Management" section to the Danger Zone. This could include buttons to: Download World (zips the world folder and sends it), Upload World (replaces the existing world), and Reset World (deletes and regenerates the world folders).
 - [ ] add a setting in the global config.json file. The frontend would then prompt for this password on first load and store a session token in localStorage. All subsequent API calls would need to include this token.
-- [ ] A simple number input in the global settings modal could control this. The value would be saved in the browser's localStorage and used by details.js to set the setInterval delay for the main polling loop.
+- [ ] add a simple number input in the global settings modal could control this. The value would be saved in the browser's localStorage and used by details.js to set the setInterval delay for the main polling loop.
 
 ## later
 

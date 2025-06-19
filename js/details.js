@@ -3,6 +3,40 @@ document.addEventListener('DOMContentLoaded', function () {
     const params = new URLSearchParams(window.location.search);
     const serverId = params.get('id');
 
+    // --- Panorama Effect ---
+    const setupPanoramaEffect = async () => {
+        const panorama = document.querySelector('.panorama-background');
+        if (!panorama) return;
+
+        try {
+            const response = await fetch(`${API_URL}/api/config`);
+            const config = await response.json();
+            const intensity = config.panorama_intensity || 1.5;
+            
+            panorama.style.setProperty('--panorama-width', `${intensity * 100}vw`);
+
+            document.addEventListener('mousemove', (e) => {
+                const { clientX } = e;
+                const screenWidth = window.innerWidth;
+                const maxPan = panorama.offsetWidth - screenWidth;
+                const panX = (clientX / screenWidth) * maxPan;
+                panorama.style.left = `-${panX}px`;
+            });
+        } catch (error) {
+            console.error("Failed to load panorama config:", error);
+            // Fallback to default behavior if config fails
+            document.addEventListener('mousemove', (e) => {
+                const { clientX } = e;
+                const screenWidth = window.innerWidth;
+                const maxPan = panorama.offsetWidth - screenWidth;
+                const panX = (clientX / screenWidth) * maxPan;
+                panorama.style.left = `-${panX}px`;
+            });
+        }
+    };
+    
+    setupPanoramaEffect();
+
     if (!serverId) {
         window.location.href = 'index.html';
         return;
@@ -848,7 +882,7 @@ document.addEventListener('DOMContentLoaded', function () {
             renderInstallScript();
         }
     });
-
+    
     function escapeHtml(unsafe) {
         if (typeof unsafe !== 'string') {
             return '';
@@ -885,18 +919,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             });
 
-            try {
+        try {
                 const response = await fetch(`${API_URL}/api/servers/${serverId}/install`, {
                     method: 'POST'
                 });
-                const data = await response.json();
+            const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data.error);
                 }
                 // Optional: switch to the logs tab automatically
                 const logsTab = new bootstrap.Tab(document.getElementById('logs-tab'));
                 logsTab.show();
-            } catch (error) {
+        } catch (error) {
                 Swal.fire('Error', `Failed to start installation: ${error.message}`, 'error');
             }
         }
@@ -1022,7 +1056,7 @@ document.addEventListener('DOMContentLoaded', function () {
             ramEditorControls.style.display = 'none';
             return;
         }
-
+        
         ramEditorControls.style.display = 'block';
         const command = startCommands[javaCommandIndex];
         const ramMatch = command.match(/-Xmx(\d+)([GgMm])?/i);
@@ -1060,19 +1094,19 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             return;
         }
-
+        
         let command = startCommands[javaCommandIndex];
         const hasXmx = /-Xmx\w+/.test(command);
         const hasXms = /-Xms\w+/.test(command);
-
+        
         if (hasXmx) {
-            command = command.replace(/-Xmx\w+/, `-Xmx${newRam}`);
+        command = command.replace(/-Xmx\w+/, `-Xmx${newRam}`);
         } else {
             command = command.replace(/java(?=\s)/, `java -Xmx${newRam}`);
         }
 
         if (hasXms) {
-            command = command.replace(/-Xms\w+/, `-Xms${newRam}`);
+        command = command.replace(/-Xms\w+/, `-Xms${newRam}`);
         } else {
             command = command.replace(/(-Xmx\w+)/, `-Xms${newRam} $1`);
         }

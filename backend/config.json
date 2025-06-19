@@ -1,5 +1,6 @@
 {
     "servers_dir": "/mnt/c/Users/bobby/Desktop/test",
     "configs_dir": "/mnt/c/Users/bobby/Documents/AI/backend/server_configs",
-    "migrated_scripts_to_config_dir": false
+    "migrated_scripts_to_config_dir": false,
+    "panorama_intensity": 1.1
 }

@@ -40,6 +40,8 @@ def load_config():
             config_data = json.load(f)
             if 'configs_dir' not in config_data:
                 config_data['configs_dir'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+            if 'panorama_intensity' not in config_data:
+                config_data['panorama_intensity'] = 1.5
             return config_data
     except (json.JSONDecodeError, IOError) as e:
         print(f"Error reading config file {CONFIG_FILE}: {e}. Using default.")

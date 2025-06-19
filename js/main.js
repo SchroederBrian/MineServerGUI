@@ -3,6 +3,40 @@ document.addEventListener('DOMContentLoaded', () => {
     const createServerBtn = document.getElementById('createServerBtn');
     const API_URL = 'http://127.0.0.1:5000';
 
+    // --- Panorama Effect ---
+    const setupPanoramaEffect = async () => {
+        const panorama = document.querySelector('.panorama-background');
+        if (!panorama) return;
+
+        try {
+            const response = await fetch(`${API_URL}/api/config`);
+            const config = await response.json();
+            const intensity = config.panorama_intensity || 1.5;
+            
+            panorama.style.setProperty('--panorama-width', `${intensity * 100}vw`);
+
+            document.addEventListener('mousemove', (e) => {
+                const { clientX } = e;
+                const screenWidth = window.innerWidth;
+                const maxPan = panorama.offsetWidth - screenWidth;
+                const panX = (clientX / screenWidth) * maxPan;
+                panorama.style.left = `-${panX}px`;
+            });
+        } catch (error) {
+            console.error("Failed to load panorama config:", error);
+            // Fallback to default behavior if config fails
+            document.addEventListener('mousemove', (e) => {
+                const { clientX } = e;
+                const screenWidth = window.innerWidth;
+                const maxPan = panorama.offsetWidth - screenWidth;
+                const panX = (clientX / screenWidth) * maxPan;
+                panorama.style.left = `-${panX}px`;
+            });
+        }
+    };
+    
+    setupPanoramaEffect();
+
     let servers = [];
 
     const renderServers = () => {
