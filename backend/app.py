@@ -11,6 +11,7 @@ import shutil
 import zipfile
 import collections
 import sys
+import uuid
 from werkzeug.utils import secure_filename
 try:
     import psutil
@@ -352,18 +353,8 @@ def server_action(server_name, action):
         return jsonify(result), status_code
         
     elif action == 'restart':
-        stop_result, stop_status = stop_server(server_name)
-        # Check if stop was successful. A 200 status code indicates success.
-        if stop_status != 200:
-             return jsonify(stop_result), stop_status
-        
-        # No time.sleep() needed, as stop_server is now blocking.
-        start_result, start_status = start_server(server_name)
-
-        # Add a custom message for the restart action
-        if start_status == 200:
-            start_result['message'] = f'Server {server_name} is restarting.'
-        return jsonify(start_result), start_status
+        result, status_code = restart_server_logic(server_name)
+        return jsonify(result), status_code
 
     return jsonify({'error': 'Invalid action specified'}), 400
 
@@ -1650,13 +1641,197 @@ def trigger_backup_now(server_name):
     except Exception as e:
         return jsonify({"error": f"Failed to start backup process: {e}"}), 500
 
+# --- Task Management ---
+TASK_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scheduler.json')
+
+def execute_task(server_name, action, command=None):
+    """The function executed by the scheduler for a given task."""
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Executing scheduled task for server '{server_name}': Action='{action}'")
+    if action == 'start':
+        start_server(server_name)
+    elif action == 'stop':
+        stop_server(server_name)
+    elif action == 'restart':
+        restart_server_logic(server_name)
+    elif action == 'command' and command:
+        screen_session_name = get_screen_session_name(server_name)
+        base_command = ['wsl'] if sys.platform == "win32" else []
+        if is_server_running(server_name):
+            try:
+                full_command = base_command + ['screen', '-S', screen_session_name, '-p', '0', '-X', 'stuff', f"{command}\n"]
+                subprocess.run(full_command, check=True, text=True)
+                print(f"Successfully sent command '{command}' to '{server_name}'")
+            except Exception as e:
+                print(f"Failed to send scheduled command '{command}' to '{server_name}': {e}")
+        else:
+            print(f"Server '{server_name}' is not running. Cannot send scheduled command.")
+
+class TaskManager:
+    def __init__(self):
+        self.config = self._load_config()
+
+    def _load_config(self):
+        if not os.path.exists(TASK_CONFIG_FILE):
+            return {}
+        try:
+            with open(TASK_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+    def _save_config(self):
+        with open(TASK_CONFIG_FILE, 'w') as f:
+            json.dump(self.config, f, indent=4)
+
+    def get_server_tasks(self, server_name):
+        return self.config.get(server_name, [])
+
+    def get_task(self, server_name, task_id):
+        tasks = self.get_server_tasks(server_name)
+        return next((task for task in tasks if task['id'] == task_id), None)
+
+    def add_or_update_task(self, server_name, task_data):
+        tasks = self.get_server_tasks(server_name)
+        task_id = task_data.get('id', str(uuid.uuid4()))
+        
+        existing_task_index = -1
+        for i, t in enumerate(tasks):
+            if t['id'] == task_id:
+                existing_task_index = i
+                break
+
+        new_task = {
+            'id': task_id,
+            'name': task_data['name'],
+            'cron': task_data['cron'],
+            'action': task_data['action'],
+            'command': task_data.get('command'),
+            'enabled': task_data.get('enabled', True)
+        }
+        
+        if existing_task_index != -1:
+            tasks[existing_task_index] = new_task
+        else:
+            tasks.append(new_task)
+        
+        self.config[server_name] = tasks
+        self._save_config()
+        self.schedule_task(server_name, new_task)
+        return new_task
+
+    def delete_task(self, server_name, task_id):
+        tasks = self.get_server_tasks(server_name)
+        task_to_delete = self.get_task(server_name, task_id)
+        if not task_to_delete:
+            return False
+            
+        self.config[server_name] = [t for t in tasks if t['id'] != task_id]
+        self._save_config()
+
+        job_id = f"task_{server_name}_{task_id}"
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+        
+        return True
+
+    def schedule_task(self, server_name, task):
+        job_id = f"task_{server_name}_{task['id']}"
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+        
+        if not task.get('enabled', True):
+            print(f"Task '{task['name']}' for '{server_name}' is disabled. Skipping schedule.")
+            return
+
+        try:
+            trigger = CronTrigger.from_crontab(task['cron'])
+            scheduler.add_job(
+                execute_task,
+                trigger=trigger,
+                args=[server_name, task['action'], task.get('command')],
+                id=job_id,
+                name=f"{server_name} - {task['name']}",
+                replace_existing=True
+            )
+            print(f"Scheduled task '{task['name']}' for '{server_name}' ({task['cron']}).")
+        except ValueError as e:
+            print(f"Error scheduling task {job_id}: Invalid cron string '{task['cron']}'. {e}")
+        except Exception as e:
+            print(f"Error scheduling task {job_id}: {e}")
+    
+    def schedule_all_tasks(self):
+        for server_name, tasks in self.config.items():
+            for task in tasks:
+                self.schedule_task(server_name, task)
+
+task_manager = TaskManager()
+
+@app.route('/api/servers/<server_name>/tasks', methods=['GET'])
+def get_tasks(server_name):
+    tasks = task_manager.get_server_tasks(server_name)
+    return jsonify(tasks)
+
+@app.route('/api/servers/<server_name>/tasks', methods=['POST'])
+def create_task(server_name):
+    data = request.get_json()
+    if not data or not all(k in data for k in ['name', 'cron', 'action']):
+        return jsonify({"error": "Missing required task data"}), 400
+    try:
+        CronTrigger.from_crontab(data['cron'])
+    except ValueError as e:
+        return jsonify({"error": f"Invalid cron string: {e}"}), 400
+    new_task = task_manager.add_or_update_task(server_name, data)
+    return jsonify(new_task), 201
+
+@app.route('/api/servers/<server_name>/tasks/<task_id>', methods=['PUT'])
+def update_task(server_name, task_id):
+    data = request.get_json()
+    if not data or not all(k in data for k in ['name', 'cron', 'action']):
+        return jsonify({"error": "Missing required task data"}), 400
+    if task_manager.get_task(server_name, task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+    try:
+        CronTrigger.from_crontab(data['cron'])
+    except ValueError as e:
+        return jsonify({"error": f"Invalid cron string: {e}"}), 400
+
+    data['id'] = task_id # ensure the id is part of the data
+    updated_task = task_manager.add_or_update_task(server_name, data)
+    return jsonify(updated_task)
+
+@app.route('/api/servers/<server_name>/tasks/<task_id>', methods=['DELETE'])
+def delete_task(server_name, task_id):
+    if task_manager.delete_task(server_name, task_id):
+        return jsonify({"message": "Task deleted successfully"})
+    else:
+        return jsonify({"error": "Task not found"}), 404
+
 def initialize_app():
     migrate_scripts_to_configs_dir()
     # Schedule backups for all configured servers on startup
     for server_name in backup_manager.config:
         backup_manager.schedule_backup(server_name)
+    task_manager.schedule_all_tasks()
     if not scheduler.running:
         scheduler.start()
+
+def restart_server_logic(server_name):
+    """A blocking function that attempts to stop and then start a server."""
+    stop_result, stop_status = stop_server(server_name)
+    # Check if stop was successful or if the server was already stopped.
+    if stop_status not in [200, 409]:
+         print(f"ERROR [{server_name}]: Could not stop server before restart: {stop_result.get('error')}")
+         return {'error': f"Could not stop server before restart: {stop_result.get('error')}"}, 500
+    
+    # Wait a moment for resources to free up before starting again.
+    time.sleep(2) 
+    
+    start_result, start_status = start_server(server_name)
+    if start_status != 200:
+        print(f"ERROR [{server_name}]: Server stopped but failed to start again: {start_result.get('error')}")
+        return start_result, start_status
+
+    return {'message': f'Server {server_name} is restarting.'}, 200
 
 if __name__ == '__main__':
     initialize_app()

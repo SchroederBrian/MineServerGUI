@@ -23,9 +23,14 @@
         <header class="text-center mb-5">
             <div class="d-flex justify-content-center align-items-center position-relative">
                 <img src="assets/MineServerGUI_Logo-Schrift.png" alt="MineServerGUI Logo" class="img-fluid" style="max-height: 100px;">
-                <button id="settingsBtn" class="btn btn-outline-secondary position-absolute" style="right: 0;" data-bs-toggle="modal" data-bs-target="#settingsModal">
-                    <i class="fas fa-cog"></i>
-                </button>
+                <div class="position-absolute d-flex" style="right: 0;">
+                    <a href="credits.html" id="creditsBtn" class="btn btn-outline-secondary me-2" title="Credits">
+                        <i class="fas fa-heart"></i>
+                    </a>
+                    <button id="settingsBtn" class="btn btn-outline-secondary" title="Settings" data-bs-toggle="modal" data-bs-target="#settingsModal">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
             </div>
             <p class="lead text-body-secondary">Manage your local Minecraft servers with ease.</p>
         </header>

@@ -145,6 +145,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const javaVersionSelect = document.getElementById('java-version-select');
     const installJavaBtn = document.getElementById('install-java-btn');
 
+    // Task Scheduler
+    const schedulerTab = document.getElementById('scheduler-tab');
+    const taskListContainer = document.getElementById('task-list-container');
+    const noTasksMsg = document.getElementById('no-tasks-msg');
+    const addTaskBtn = document.getElementById('add-task-btn');
+
     // Danger Zone
     const deleteServerBtn = document.getElementById('delete-server-btn');
 
@@ -1582,6 +1588,207 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // --- Task Scheduler ---
+
+    const renderTasks = (tasks) => {
+        taskListContainer.innerHTML = '';
+        if (!tasks || tasks.length === 0) {
+            taskListContainer.appendChild(noTasksMsg);
+            noTasksMsg.style.display = 'block';
+            return;
+        }
+
+        noTasksMsg.style.display = 'none';
+
+        tasks.forEach(task => {
+            const cronDescription = cronstrue.toString(task.cron, {
+                verbose: true,
+                use24HourTimeFormat: true
+            });
+            const actionIcon = {
+                'start': 'fa-play text-success',
+                'stop': 'fa-stop text-danger',
+                'restart': 'fa-sync-alt text-warning',
+                'command': 'fa-terminal text-info'
+            }[task.action];
+
+            const taskEl = document.createElement('div');
+            taskEl.className = 'list-group-item list-group-item-dark d-flex justify-content-between align-items-center';
+            taskEl.innerHTML = `
+                <div class="flex-grow-1">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1 fw-bold">${escapeHtml(task.name)}</h5>
+                        <small class="text-body-secondary">${task.enabled ? 'Enabled' : 'Disabled'}</small>
+                    </div>
+                    <p class="mb-1 text-body-secondary"><i class="far fa-calendar-alt me-2"></i><code>${task.cron}</code> &mdash; ${cronDescription}</p>
+                    <small class="d-flex align-items-center"><i class="fas ${actionIcon} me-2"></i>
+                        Action: <strong class="ms-1">${task.action}</strong>
+                        ${task.action === 'command' ? `<code class="ms-2 font-monospace text-truncate" style="max-width: 300px;">${escapeHtml(task.command)}</code>` : ''}
+                    </small>
+                </div>
+                <div class="ms-3">
+                    <button class="btn btn-sm btn-outline-primary edit-task-btn" title="Edit Task"><i class="fas fa-pencil-alt"></i></button>
+                    <button class="btn btn-sm btn-outline-danger delete-task-btn" title="Delete Task"><i class="fas fa-trash"></i></button>
+                </div>
+            `;
+            
+            taskEl.querySelector('.edit-task-btn').addEventListener('click', () => openTaskModal(task));
+            taskEl.querySelector('.delete-task-btn').addEventListener('click', () => deleteTask(task.id));
+
+            taskListContainer.appendChild(taskEl);
+        });
+    };
+
+    const fetchTasks = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/tasks`);
+            if (!response.ok) throw new Error('Failed to fetch tasks');
+            const tasks = await response.json();
+            renderTasks(tasks);
+        } catch (error) {
+            console.error(error);
+            taskListContainer.innerHTML = '<p class="text-danger">Could not load scheduled tasks.</p>';
+        }
+    };
+
+    const deleteTask = async (taskId) => {
+        const result = await Swal.fire({
+            title: 'Are you sure?',
+            text: "You are about to delete this scheduled task.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, delete it!',
+            customClass: { popup: 'bg-dark text-white' }
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`${API_URL}/api/servers/${serverId}/tasks/${taskId}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to delete task.');
+                }
+                Swal.fire('Deleted!', 'The task has been deleted.', 'success');
+                fetchTasks(); // Refresh list
+            } catch (error) {
+                Swal.fire('Error', error.message, 'error');
+            }
+        }
+    };
+
+    const openTaskModal = (task = {}) => {
+        const isEditing = !!task.id;
+
+        Swal.fire({
+            title: isEditing ? 'Edit Scheduled Task' : 'Create a New Task',
+            html: `
+                <form id="swal-taskForm" class="text-start">
+                    <div class="mb-3">
+                        <label for="swal-taskName" class="form-label">Task Name</label>
+                        <input type="text" id="swal-taskName" class="form-control bg-dark-subtle" placeholder="e.g., Daily Restart" value="${escapeHtml(task.name || '')}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="swal-taskCron" class="form-label">Cron Schedule (Minute Hour Day-of-Month Month Day-of-Week)</label>
+                        <input type="text" id="swal-taskCron" class="form-control bg-dark-subtle" placeholder="e.g., 0 4 * * *" value="${escapeHtml(task.cron || '0 4 * * *')}" required>
+                        <div id="cron-helper" class="form-text mt-1 text-info-emphasis"></div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-6 mb-3">
+                            <label for="swal-taskAction" class="form-label">Action</label>
+                            <select id="swal-taskAction" class="form-select bg-dark-subtle">
+                                <option value="restart" ${task.action === 'restart' ? 'selected' : ''}>Restart</option>
+                                <option value="start" ${task.action === 'start' ? 'selected' : ''}>Start</option>
+                                <option value="stop" ${task.action === 'stop' ? 'selected' : ''}>Stop</option>
+                                <option value="command" ${task.action === 'command' ? 'selected' : ''}>Run Command</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3" id="swal-taskCommand-container">
+                            <label for="swal-taskCommand" class="form-label">Command</label>
+                            <input type="text" id="swal-taskCommand" class="form-control bg-dark-subtle" placeholder="e.g., say Server restarting soon!" value="${escapeHtml(task.command || '')}">
+                        </div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="swal-taskEnabled" ${task.enabled !== false ? 'checked' : ''}>
+                        <label class="form-check-label" for="swal-taskEnabled">Enabled</label>
+                    </div>
+                </form>
+            `,
+            showCancelButton: true,
+            confirmButtonText: isEditing ? 'Save Changes' : 'Create Task',
+            customClass: { popup: 'bg-dark text-white' },
+            didOpen: () => {
+                const cronInput = document.getElementById('swal-taskCron');
+                const cronHelper = document.getElementById('cron-helper');
+                const actionSelect = document.getElementById('swal-taskAction');
+                const commandContainer = document.getElementById('swal-taskCommand-container');
+
+                const updateCronHelper = () => {
+                    try {
+                        cronHelper.textContent = cronstrue.toString(cronInput.value);
+                        cronHelper.classList.remove('text-danger');
+                        cronHelper.classList.add('text-info-emphasis');
+                        Swal.getConfirmButton().disabled = false;
+                    } catch (e) {
+                        cronHelper.textContent = e.toString();
+                        cronHelper.classList.add('text-danger');
+                        cronHelper.classList.remove('text-info-emphasis');
+                        Swal.getConfirmButton().disabled = true;
+                    }
+                };
+
+                const toggleCommandInput = () => {
+                    commandContainer.style.display = actionSelect.value === 'command' ? 'block' : 'none';
+                };
+
+                cronInput.addEventListener('input', updateCronHelper);
+                actionSelect.addEventListener('change', toggleCommandInput);
+                
+                // Initial state
+                updateCronHelper();
+                toggleCommandInput();
+            },
+            preConfirm: () => {
+                const name = document.getElementById('swal-taskName').value;
+                if (!name) {
+                    Swal.showValidationMessage('Task Name is required');
+                    return false;
+                }
+                return {
+                    id: task.id,
+                    name: name,
+                    cron: document.getElementById('swal-taskCron').value,
+                    action: document.getElementById('swal-taskAction').value,
+                    command: document.getElementById('swal-taskCommand').value,
+                    enabled: document.getElementById('swal-taskEnabled').checked
+                };
+            }
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                const taskData = result.value;
+                const url = isEditing ? `${API_URL}/api/servers/${serverId}/tasks/${task.id}` : `${API_URL}/api/servers/${serverId}/tasks`;
+                const method = isEditing ? 'PUT' : 'POST';
+
+                try {
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(taskData)
+                    });
+                    const res = await response.json();
+                    if (!response.ok) {
+                        throw new Error(res.error || 'Failed to save task.');
+                    }
+                    Swal.fire('Success!', `Task ${isEditing ? 'updated' : 'created'} successfully.`, 'success');
+                    fetchTasks(); // Refresh the list
+                } catch (error) {
+                    Swal.fire('Error!', error.message, 'error');
+                }
+            }
+        });
+    };
+
     // --- Initial Load ---
     console.log(`[INIT] Initializing detail view for server: ${serverId}`);
     startPolling();
@@ -1813,4 +2020,11 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         fileExplorerModal.hide();
     });
+
+    if (schedulerTab) {
+        schedulerTab.addEventListener('shown.bs.tab', fetchTasks);
+    }
+    if (addTaskBtn) {
+        addTaskBtn.addEventListener('click', () => openTaskModal());
+    }
 });

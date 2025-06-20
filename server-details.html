@@ -86,6 +86,9 @@
                                 <button class="nav-link" id="files-tab" data-bs-toggle="tab" data-bs-target="#file-explorer-pane" type="button" role="tab"><i class="fas fa-folder-open me-2"></i>File Explorer</button>
                             </li>
                             <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="scheduler-tab" data-bs-toggle="tab" data-bs-target="#scheduler-pane" type="button" role="tab"><i class="fas fa-clock me-2"></i>Task Scheduler</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-pane" type="button" role="tab"><i class="fas fa-cog me-2"></i>Settings</button>
                             </li>
                         </ul>
@@ -215,6 +218,20 @@
                                     <textarea id="file-content-editor" class="form-control font-monospace bg-dark-subtle" rows="15"></textarea>
                                 </div>
                             </div>
+                            <!-- Task Scheduler Pane -->
+                            <div class="tab-pane fade" id="scheduler-pane" role="tabpanel">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h3 class="h5 mb-0">Scheduled Tasks</h3>
+                                    <button id="add-task-btn" class="btn btn-success btn-sm"><i class="fas fa-plus me-2"></i>Add New Task</button>
+                                </div>
+                                <p class="text-body-secondary small mb-3">Automate server actions like restarts, stops, or running commands on a schedule.</p>
+                                <div id="task-list-container" class="list-group list-group-dark">
+                                    <div class="text-body-secondary text-center p-3" id="no-tasks-msg">
+                                        No scheduled tasks yet.
+                                    </div>
+                                    <!-- Scheduled tasks will be dynamically inserted here -->
+                                </div>
+                            </div>
                             <!-- Settings Pane -->
                             <div class="tab-pane fade" id="settings-pane" role="tabpanel">
                                 <div id="install-panel" class="p-3 rounded bg-dark-tertiary mb-4">
@@ -339,6 +356,7 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cronstrue@2.49.0/dist/cronstrue.min.js"></script>
     <script src="js/details.js"></script>
 </body>
 </html> 
