@@ -56,7 +56,7 @@ Ready to take control? Follow these simple steps to get MineServerGUI up and run
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/YOUR_USERNAME/MineServerGUI.git
+    git clone https://github.com/SchroederBrian/MineServerGUI
     cd MineServerGUI
     ```
 
