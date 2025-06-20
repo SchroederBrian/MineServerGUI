@@ -92,6 +92,27 @@ document.addEventListener('DOMContentLoaded', function () {
     const saveFileBtn = document.getElementById('save-file-btn');
     const cancelEditBtn = document.getElementById('cancel-edit-btn');
     
+    // Server Properties
+    const propertiesTab = document.getElementById('properties-tab');
+    const propertiesFormContainer = document.getElementById('properties-form-container');
+    const savePropertiesBtn = document.getElementById('save-properties-btn');
+
+    // Backup Settings
+    const backupsTab = document.getElementById('backups-tab');
+    const backupLocationInput = document.getElementById('backup-location-input');
+    const backupFrequencySelect = document.getElementById('backup-frequency-select');
+    const backupRetentionInput = document.getElementById('backup-retention-input');
+    const saveBackupSettingsBtn = document.getElementById('save-backup-settings-btn');
+    const browseBackupsBtn = document.querySelector('.browse-backups-btn');
+    const backupNowBtn = document.getElementById('backup-now-btn');
+
+    // File Explorer Modal (for backups)
+    const fileExplorerModal = new bootstrap.Modal(document.getElementById('fileExplorerModal'));
+    const fileExplorerList = document.getElementById('fileExplorerList');
+    const currentPathDisplay = document.getElementById('currentPathDisplay');
+    const selectDirectoryBtn = document.getElementById('selectDirectoryBtn');
+    let activeInputId = null;
+
     // Settings/Installation
     const commandListEl = document.getElementById('command-list');
     const newCommandInput = document.getElementById('new-command-input');
@@ -1360,6 +1381,207 @@ document.addEventListener('DOMContentLoaded', function () {
 
     changeSoftwareBtn.addEventListener('click', changeSoftware);
 
+    // --- Server Properties ---
+    const fetchServerProperties = async () => {
+        propertiesFormContainer.innerHTML = '<p class="text-center text-body-secondary">Loading properties...</p>';
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/properties`);
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to load server properties.');
+            }
+            const properties = await response.json();
+            renderServerProperties(properties);
+        } catch (error) {
+            console.error(error);
+            propertiesFormContainer.innerHTML = `<p class="text-danger text-center">${error.message}</p>`;
+        }
+    };
+
+    const renderServerProperties = (properties) => {
+        if (Object.keys(properties).length === 0) {
+            propertiesFormContainer.innerHTML = '<p class="text-center text-body-secondary">No <code>server.properties</code> file found. It will be created on save.</p>';
+            return;
+        }
+
+        let formHtml = '<form id="server-properties-form" class="row g-2">';
+        const sortedKeys = Object.keys(properties).sort();
+
+        for (const key of sortedKeys) {
+            const value = properties[key];
+            const id = `prop-${key.replace('.', '-')}`;
+            
+            let inputHtml = '';
+            const commonClasses = "form-control form-control-sm bg-dark-subtle text-white";
+
+            if (value === 'true' || value === 'false') {
+                inputHtml = `
+                    <select id="${id}" name="${key}" class="form-select form-select-sm bg-dark-subtle text-white">
+                        <option value="true" ${value === 'true' ? 'selected' : ''}>true</option>
+                        <option value="false" ${value === 'false' ? 'selected' : ''}>false</option>
+                    </select>
+                `;
+            } else if (!isNaN(value) && value.trim() !== '' && !key.toLowerCase().includes('name') && !key.toLowerCase().includes('id') && !key.toLowerCase().includes('motd') && !key.includes('.')) {
+                inputHtml = `<input type="number" id="${id}" name="${key}" value="${escapeHtml(value)}" class="${commonClasses}">`;
+            } else {
+                inputHtml = `<input type="text" id="${id}" name="${key}" value="${escapeHtml(value)}" class="${commonClasses}">`;
+            }
+
+            formHtml += `
+                <div class="col-md-6 d-flex align-items-center">
+                    <label for="${id}" class="form-label text-body-secondary font-monospace small mb-0 me-2 text-nowrap" title="${key}">${key}</label>
+                    ${inputHtml}
+                </div>
+            `;
+        }
+
+        formHtml += '</form>';
+        propertiesFormContainer.innerHTML = formHtml;
+    };
+
+    const saveServerProperties = async () => {
+        const form = document.getElementById('server-properties-form');
+        let properties = {};
+        
+        if (form) {
+            const formData = new FormData(form);
+            for (const [key, value] of formData.entries()) {
+                properties[key] = value;
+            }
+        } else {
+            // Handle case where form doesn't exist (e.g., no properties file yet)
+            // In this case, there's nothing to save yet, but could be extended
+            // to allow adding properties from scratch. For now, we just prevent errors.
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/properties`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(properties),
+            });
+
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to save properties.');
+            }
+
+            Swal.fire({
+                title: 'Success!',
+                text: 'Server properties saved. A restart is required for changes to take effect.',
+                icon: 'success',
+                customClass: { popup: 'bg-dark text-white' }
+            });
+
+        } catch (error) {
+            Swal.fire({
+                title: 'Error!',
+                text: error.message,
+                icon: 'error',
+                customClass: { popup: 'bg-dark text-white' }
+            });
+        }
+    };
+
+    // --- Backup Settings ---
+    const fetchBackupSettings = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/backups/settings`);
+            if (!response.ok) throw new Error('Failed to load backup settings.');
+            const settings = await response.json();
+            
+            backupLocationInput.value = settings.location;
+            backupFrequencySelect.value = settings.frequency;
+            backupRetentionInput.value = settings.retention;
+        } catch (error) {
+            console.error(error);
+            // Optionally show an error to the user
+        }
+    };
+
+    const saveBackupSettings = async () => {
+        const settings = {
+            location: backupLocationInput.value,
+            frequency: backupFrequencySelect.value,
+            retention: backupRetentionInput.value
+        };
+
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/backups/settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error);
+            Swal.fire('Success', 'Backup settings saved!', 'success');
+        } catch (error) {
+            Swal.fire('Error', `Failed to save backup settings: ${error.message}`, 'error');
+        }
+    };
+
+    const triggerBackupNow = async () => {
+        Swal.fire({
+            title: 'Start Backup?',
+            text: "This will start a new backup process immediately. This may take a while.",
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, start it!',
+            customClass: { popup: 'bg-dark text-white' }
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                try {
+                    const response = await fetch(`${API_URL}/api/servers/${serverId}/backups/now`, { method: 'POST' });
+                    const resData = await response.json();
+                    if (!response.ok) throw new Error(resData.error);
+                    
+                    Swal.fire({
+                        title: 'In Progress',
+                        text: 'Backup started in the background. Check the backend console for progress.',
+                        icon: 'success',
+                        customClass: { popup: 'bg-dark text-white' }
+                    });
+                } catch (error) {
+                    Swal.fire({
+                        title: 'Error',
+                        text: `Failed to start backup: ${error.message}`,
+                        icon: 'error',
+                        customClass: { popup: 'bg-dark text-white' }
+                    });
+                }
+            }
+        });
+    };
+
+    // --- Event Listeners ---
+    if (deleteServerBtn) {
+        deleteServerBtn.addEventListener('click', deleteServer);
+    }
+    if (propertiesTab) {
+        propertiesTab.addEventListener('shown.bs.tab', fetchServerProperties);
+    }
+    if (savePropertiesBtn) {
+        savePropertiesBtn.addEventListener('click', saveServerProperties);
+    }
+    if (backupsTab) {
+        backupsTab.addEventListener('shown.bs.tab', fetchBackupSettings);
+    }
+    if (saveBackupSettingsBtn) {
+        saveBackupSettingsBtn.addEventListener('click', saveBackupSettings);
+    }
+    if (backupNowBtn) {
+        backupNowBtn.addEventListener('click', triggerBackupNow);
+    }
+    if (browseBackupsBtn) {
+        browseBackupsBtn.addEventListener('click', () => {
+            activeInputId = browseBackupsBtn.getAttribute('data-input-target');
+            const currentPath = document.getElementById(activeInputId).value;
+            openFileExplorer(currentPath);
+            fileExplorerModal.show();
+        });
+    }
+
     // --- Initial Load ---
     console.log(`[INIT] Initializing detail view for server: ${serverId}`);
     startPolling();
@@ -1527,4 +1749,68 @@ document.addEventListener('DOMContentLoaded', function () {
             container.appendChild(commandEl);
         });
     };
+
+    // --- Shared File Explorer (for Backups, etc.) ---
+    const openFileExplorer = async (path = '') => {
+        try {
+            const response = await fetch(`${API_URL}/api/browse?path=${encodeURIComponent(path)}`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                Swal.fire('Error', `Failed to browse path: ${data.error}`, 'error');
+                return;
+            }
+            
+            currentPathDisplay.textContent = data.current_path;
+            fileExplorerList.innerHTML = ''; // Clear previous content
+
+            // Add an 'up' directory item
+            if (data.parent_path !== null && data.parent_path !== undefined) {
+                 const upEl = document.createElement('a');
+                 upEl.href = '#';
+                 upEl.className = 'list-group-item list-group-item-action list-group-item-secondary';
+                 upEl.innerHTML = `<i class="fas fa-arrow-up me-2"></i>..`;
+                 upEl.addEventListener('click', (e) => {
+                     e.preventDefault();
+                     openFileExplorer(data.parent_path);
+                 });
+                 fileExplorerList.appendChild(upEl);
+            }
+
+            data.directories.forEach(dir => {
+                const dirEl = document.createElement('a');
+                dirEl.href = '#';
+                dirEl.className = 'list-group-item list-group-item-action';
+                dirEl.innerHTML = `<i class="fas fa-folder me-2"></i>${dir}`;
+                dirEl.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    let newPath;
+                    if (data.current_path === 'My Computer') {
+                        newPath = dir;
+                    } else {
+                        // Use forward slashes for consistency, as the backend expects them on non-Windows platforms.
+                        const basePath = data.current_path.replace(/\\\\/g, '/');
+                        newPath = basePath.endsWith('/') ? `${basePath}${dir}` : `${basePath}/${dir}`;
+                    }
+                    openFileExplorer(newPath);
+                });
+                fileExplorerList.appendChild(dirEl);
+            });
+
+        } catch (error) {
+            Swal.fire('Error', `Error opening file explorer: ${error.message}`, 'error');
+        }
+    };
+    
+    // Event Listener for Select Directory Button
+    selectDirectoryBtn.addEventListener('click', () => {
+        if (activeInputId) {
+            const selectedPath = currentPathDisplay.textContent;
+            // Avoid setting path to "My Computer"
+            if (selectedPath !== "My Computer") {
+                document.getElementById(activeInputId).value = selectedPath;
+            }
+        }
+        fileExplorerModal.hide();
+    });
 });

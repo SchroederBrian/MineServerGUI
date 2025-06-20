@@ -16,6 +16,8 @@ try:
     import psutil
 except ImportError:
     psutil = None
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # --- Configuration ---
 app = Flask(__name__)
@@ -384,7 +386,7 @@ def clear_logs(server_name):
         # Clear the log file by opening it in write mode
         with open(log_file_path, 'w') as f:
             f.write("[Logs cleared]\n")
-
+            
         # If the server is running, also send a command to clear the screen
         ##if is_server_running(server_name):
         ##    screen_session_name = get_screen_session_name(server_name)
@@ -1441,8 +1443,223 @@ def migrate_scripts_to_configs_dir():
     save_config(config)
     print("Script migration check complete.")
 
+def parse_properties(file_path):
+    """Parses a .properties file into a dictionary, preserving the order."""
+    properties = {}
+    if not os.path.exists(file_path):
+        return properties
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    properties[key.strip()] = value.strip()
+    return properties
+
+@app.route('/api/servers/<server_name>/properties', methods=['GET'])
+def get_server_properties_endpoint(server_name):
+    """Gets the full server.properties file as a JSON object."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    props_file = os.path.join(server_path, 'server.properties')
+    if not os.path.exists(props_file):
+        return jsonify({}) # Return empty object if no properties file
+        
+    properties = parse_properties(props_file)
+    return jsonify(properties)
+
+@app.route('/api/servers/<server_name>/properties', methods=['POST'])
+def save_server_properties_endpoint(server_name):
+    """Updates the server.properties file from a JSON object."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+        
+    new_props = request.get_json()
+    if not new_props:
+        return jsonify({"error": "No properties data provided"}), 400
+
+    props_file = os.path.join(server_path, 'server.properties')
+    
+    if not os.path.exists(props_file):
+        with open(props_file, 'w', encoding='utf-8') as f:
+            for key, value in new_props.items():
+                f.write(f"{key}={value}\n")
+        return jsonify({"message": "server.properties created and saved."})
+
+    try:
+        with open(props_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        with open(props_file, 'w', encoding='utf-8') as f:
+            updated_keys = set(new_props.keys())
+            for line in lines:
+                stripped_line = line.strip()
+                if not stripped_line.startswith('#') and '=' in stripped_line:
+                    key = stripped_line.split('=', 1)[0].strip()
+                    if key in new_props:
+                        f.write(f"{key}={new_props[key]}\n")
+                        updated_keys.discard(key)
+                    else:
+                        f.write(line)
+                else:
+                    f.write(line)
+            
+            for key in updated_keys:
+                f.write(f"{key}={new_props[key]}\n")
+
+        return jsonify({"message": "Server properties updated successfully."})
+    except Exception as e:
+        return jsonify({"error": f"Failed to write to server.properties: {e}"}), 500
+
+# --- Backup Management ---
+BACKUP_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups.json')
+scheduler = BackgroundScheduler(daemon=True)
+
+class BackupManager:
+    def __init__(self):
+        self.config = self._load_config()
+
+    def _load_config(self):
+        if not os.path.exists(BACKUP_CONFIG_FILE):
+            return {}
+        try:
+            with open(BACKUP_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+    def _save_config(self):
+        with open(BACKUP_CONFIG_FILE, 'w') as f:
+            json.dump(self.config, f, indent=4)
+
+    def get_server_backup_config(self, server_name):
+        return self.config.get(server_name, {
+            "location": "",
+            "frequency": "disabled",
+            "retention": 7
+        })
+
+    def update_server_backup_config(self, server_name, settings):
+        self.config[server_name] = {
+            "location": settings.get("location", ""),
+            "frequency": settings.get("frequency", "disabled"),
+            "retention": int(settings.get("retention", 7))
+        }
+        self._save_config()
+        self.schedule_backup(server_name)
+
+    def run_backup(self, server_name):
+        server_config = self.get_server_backup_config(server_name)
+        if server_config["frequency"] == "disabled" or not server_config["location"]:
+            print(f"Backup for '{server_name}' is disabled or location is not set. Skipping.")
+            return
+
+        server_path = os.path.join(SERVERS_DIR, server_name)
+        backup_dir = server_config["location"]
+        retention = server_config["retention"]
+        
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+        backup_filename = f"{server_name}_{timestamp}.zip"
+        backup_filepath = os.path.join(backup_dir, backup_filename)
+        
+        print(f"Starting backup for '{server_name}' to '{backup_filepath}'...")
+        try:
+            with zipfile.ZipFile(backup_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, _, files in os.walk(server_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        # Exclude backup files from the backup itself to prevent recursion
+                        if not file_path.startswith(backup_dir):
+                            zipf.write(file_path, os.path.relpath(file_path, server_path))
+            
+            print(f"Backup for '{server_name}' completed successfully.")
+            self.enforce_retention(backup_dir, retention)
+        except Exception as e:
+            print(f"Error during backup for '{server_name}': {e}")
+
+    def enforce_retention(self, backup_dir, retention):
+        try:
+            backups = sorted(
+                [os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith('.zip')],
+                key=os.path.getmtime
+            )
+            
+            if len(backups) > retention:
+                backups_to_delete = backups[:len(backups) - retention]
+                for backup in backups_to_delete:
+                    os.remove(backup)
+                    print(f"Deleted old backup: {backup}")
+        except Exception as e:
+            print(f"Error enforcing retention policy: {e}")
+
+    def schedule_backup(self, server_name):
+        job_id = f"backup_{server_name}"
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+
+        server_config = self.get_server_backup_config(server_name)
+        frequency = server_config["frequency"]
+        
+        trigger = None
+        if frequency == 'daily':
+            trigger = CronTrigger(hour=3) # 3 AM daily
+        elif frequency == 'weekly':
+            trigger = CronTrigger(day_of_week='sun', hour=3) # 3 AM every Sunday
+        elif frequency == 'monthly':
+            trigger = CronTrigger(day=1, hour=3) # 3 AM on the 1st of the month
+
+        if trigger:
+            scheduler.add_job(
+                self.run_backup,
+                trigger=trigger,
+                args=[server_name],
+                id=job_id,
+                replace_existing=True
+            )
+            print(f"Scheduled backup for '{server_name}' ({frequency}).")
+
+backup_manager = BackupManager()
+
+@app.route('/api/servers/<server_name>/backups/settings', methods=['GET'])
+def get_backup_settings(server_name):
+    return jsonify(backup_manager.get_server_backup_config(server_name))
+
+@app.route('/api/servers/<server_name>/backups/settings', methods=['POST'])
+def save_backup_settings(server_name):
+    settings = request.get_json()
+    if not settings:
+        return jsonify({"error": "No settings provided"}), 400
+    backup_manager.update_server_backup_config(server_name, settings)
+    return jsonify({"message": "Backup settings saved successfully."})
+
+@app.route('/api/servers/<server_name>/backups/now', methods=['POST'])
+def trigger_backup_now(server_name):
+    """Triggers an immediate backup for a specific server."""
+    try:
+        # Run in a background thread to not block the request
+        thread = Thread(target=backup_manager.run_backup, args=[server_name])
+        thread.daemon = True
+        thread.start()
+        return jsonify({"message": "Backup process started in the background."})
+    except Exception as e:
+        return jsonify({"error": f"Failed to start backup process: {e}"}), 500
+
+def initialize_app():
+    migrate_scripts_to_configs_dir()
+    # Schedule backups for all configured servers on startup
+    for server_name in backup_manager.config:
+        backup_manager.schedule_backup(server_name)
+    if not scheduler.running:
+        scheduler.start()
 
 if __name__ == '__main__':
-    if not config.get('migrated_scripts_to_config_dir'):
-        migrate_scripts_to_configs_dir()
-    app.run(debug=True, port=5000) 
+    initialize_app()
+    app.run(debug=True, use_reloader=False)
+else: # When run with 'flask run'
+    initialize_app() 

@@ -1,0 +1,7 @@
+{
+    "test": {
+        "location": "/mnt/c/Users/bobby/Desktop/test/backups",
+        "frequency": "daily",
+        "retention": 3
+    }
+}
