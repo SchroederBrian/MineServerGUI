@@ -1,8 +1,8 @@
 <div align="center">
   <br/>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lissy93/readme-themes/main/assets/images/dark/application-management-dashboard.png">
-    <img alt="Showcase of the Minecraft Server GUI" width="800" src="https://raw.githubusercontent.com/lissy93/readme-themes/main/assets/images/light/application-management-dashboard.png">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/preview.png">
+    <img alt="Showcase of the Minecraft Server GUI" width="800" src="assets/preview.png">
   </picture>
   <br/>
   <br/>
