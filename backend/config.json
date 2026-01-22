@@ -1,9 +1,10 @@
 {
-    "servers_dir": "/path/to/your/MineServerGUI",
-    "configs_dir": "/path/to/your/MineServerGUI/server_configs",
+    "servers_dir": "/mnt/c/Users/bobby/Downloads/Mineservergui/MineServerGUI/servers",
+    "configs_dir": "/mnt/c/Users/bobby/Downloads/Mineservergui/MineServerGUI/backend/server_configs",
     "migrated_scripts_to_config_dir": true,
     "panorama_intensity": 1.05,
     "host": "0.0.0.0",
     "port": 5000,
-    "debug": false
+    "debug": false,
+    "secret_key": "a9dc9bee4a47947d4aa919933feb721fa8770a1827f4450e80c5922ccdc6ad4a"
 }

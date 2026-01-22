@@ -1,6 +1,13 @@
 const API_URL = 'http://127.0.0.1:5000';
 
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Fetch Wrapper with Credentials ---
+    const authenticatedFetch = (url, options = {}) => {
+        return fetch(url, {
+            ...options,
+            credentials: 'include'
+        });
+    };
     const settingsModal = document.getElementById('settingsModal');
     const serversDirInput = document.getElementById('servers-dir-input');
     const configsDirInput = document.getElementById('configs-dir-input');
@@ -18,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchConfig = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/config`);
+            const response = await authenticatedFetch(`${API_URL}/api/config`);
             const config = await response.json();
             if (response.ok) {
                 serversDirInput.value = config.servers_dir;
@@ -33,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const openFileExplorer = async (path = '') => {
         try {
-            const response = await fetch(`${API_URL}/api/browse?path=${encodeURIComponent(path)}`);
+            const response = await authenticatedFetch(`${API_URL}/api/browse?path=${encodeURIComponent(path)}`);
             const data = await response.json();
 
             if (!response.ok) {
@@ -92,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveSettingsBtn.disabled = true;
 
         try {
-            const response = await fetch(`${API_URL}/api/config`, {
+            const response = await authenticatedFetch(`${API_URL}/api/config`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -141,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchScreens = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/screens`);
+            const response = await authenticatedFetch(`${API_URL}/api/screens`);
             const screens = await response.json();
             screenList.innerHTML = ''; // Clear existing list
             if (response.ok) {
@@ -181,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (result.isConfirmed) {
             try {
-                const response = await fetch(`${API_URL}/api/screens/terminate-all`, { method: 'POST' });
+                const response = await authenticatedFetch(`${API_URL}/api/screens/terminate-all`, { method: 'POST' });
                 const res = await response.json();
                 if (response.ok) {
                     Swal.fire('Success!', res.message, 'success');

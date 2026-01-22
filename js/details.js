@@ -1,7 +1,37 @@
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     const API_URL = 'http://127.0.0.1:5000';
     const params = new URLSearchParams(window.location.search);
     const serverId = params.get('id');
+
+    // --- Fetch Wrapper with Credentials ---
+    const authenticatedFetch = (url, options = {}) => {
+        return fetch(url, {
+            ...options,
+            credentials: 'include'
+        });
+    };
+
+    // --- Authentication Check ---
+    async function checkAuthentication() {
+        try {
+            const response = await authenticatedFetch(`${API_URL}/api/auth/status`);
+            const data = await response.json();
+            
+            if (!data.authenticated) {
+                window.location.href = 'login.html';
+                return false;
+            }
+            return true;
+        } catch (error) {
+            console.error('Authentication check failed:', error);
+            window.location.href = 'login.html';
+            return false;
+        }
+    }
+    
+    // Check authentication before initializing the page
+    const isAuthenticated = await checkAuthentication();
+    if (!isAuthenticated) return;
 
     // --- Panorama Effect ---
     const setupPanoramaEffect = async () => {
@@ -9,7 +39,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!panorama) return;
 
         try {
-            const response = await fetch(`${API_URL}/api/config`);
+            const response = await authenticatedFetch(`${API_URL}/api/config`);
             const config = await response.json();
             const intensity = config.panorama_intensity || 1.5;
             
@@ -188,7 +218,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         try {
             // Fetch the main server details first
-            const detailsResponse = await fetch(`${API_URL}/api/servers/${serverId}`);
+            const detailsResponse = await authenticatedFetch(`${API_URL}/api/servers/${serverId}`);
             if (!detailsResponse.ok) {
                 if(detailsResponse.status === 404) {
                     console.error('[POLL] Server not found (404). Stopping poll.');
@@ -204,7 +234,7 @@ document.addEventListener('DOMContentLoaded', function () {
             updateUIDetails(details);
             
             if (details.status === 'Running') {
-                const statusResponse = await fetch(`${API_URL}/api/servers/${serverId}/status`);
+                const statusResponse = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/status`);
                 // We still fetch status but no longer update UI with it.
                 // This could be used for other things in the future.
             } else {
@@ -337,7 +367,7 @@ document.addEventListener('DOMContentLoaded', function () {
         Object.values(btnMap).forEach(b => b.disabled = true);
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/${action}`, { method: 'POST' });
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/${action}`, { method: 'POST' });
             const data = await response.json(); // Always parse json to get the message or error
 
             if (!response.ok) {
@@ -437,7 +467,7 @@ document.addEventListener('DOMContentLoaded', function () {
         fileListContainer.querySelectorAll('.list-group-item, .text-danger').forEach(el => el.remove());
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`);
             if (!response.ok) throw new Error('Failed to fetch files');
             const files = await response.json();
             renderFileList(files, path);
@@ -550,7 +580,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- File Editor ---
     const openFileEditor = async (filePath) => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/content?path=${encodeURIComponent(filePath)}`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/files/content?path=${encodeURIComponent(filePath)}`);
             if (!response.ok) throw new Error('Could not read file.');
             const data = await response.json();
             
@@ -583,7 +613,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!path) {
                 throw new Error("No file path specified for saving.");
             }
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/content`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/files/content`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -633,7 +663,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const fetchLogs = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/log?since=${currentLogLine}`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/log?since=${currentLogLine}`);
             if (!response.ok) throw new Error(`Server returned status ${response.status}`);
             
             const data = await response.json();
@@ -686,7 +716,7 @@ document.addEventListener('DOMContentLoaded', function () {
         clearLogsBtn.disabled = true;
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/clear-logs`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/clear-logs`, {
                 method: 'POST'
             });
             
@@ -811,7 +841,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         consoleInputEl.disabled = true;
         try {
-            await fetch(`${API_URL}/api/servers/${serverId}/console`, {
+            await authenticatedFetch(`${API_URL}/api/servers/${serverId}/console`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ command }),
@@ -872,7 +902,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const fetchInstallScript = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/install-script`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/install-script`);
             const data = await response.json();
             installCommands = data.commands || [];
             renderInstallScript();
@@ -884,7 +914,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const saveInstallScript = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/install-script`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/install-script`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ commands: installCommands })
@@ -946,7 +976,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
         try {
-                const response = await fetch(`${API_URL}/api/servers/${serverId}/install`, {
+                const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/install`, {
                     method: 'POST'
                 });
             const data = await response.json();
@@ -982,7 +1012,7 @@ document.addEventListener('DOMContentLoaded', function () {
         logsTab.show();
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/java/install`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/java/install`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ version: javaVersion })
@@ -1036,7 +1066,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const fetchStartScript = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/start-script`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/start-script`);
             const data = await response.json();
             startCommands = data.commands || [];
             renderStartScript();
@@ -1048,7 +1078,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const saveStartScript = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/start-script`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/start-script`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ commands: startCommands })
@@ -1180,7 +1210,7 @@ document.addEventListener('DOMContentLoaded', function () {
         deleteServerBtn.disabled = true;
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}`, {
                 method: 'DELETE'
             });
 
@@ -1261,7 +1291,7 @@ document.addEventListener('DOMContentLoaded', function () {
         savePortBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/port`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/port`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ port: newPort })
@@ -1305,7 +1335,7 @@ document.addEventListener('DOMContentLoaded', function () {
         versionSelect.disabled = true;
         versionSelect.innerHTML = '<option>Loading versions...</option>';
         try {
-            const response = await fetch(`${API_URL}/api/loaders/${loader}/versions`);
+            const response = await authenticatedFetch(`${API_URL}/api/loaders/${loader}/versions`);
             const versions = await response.json();
             if (response.ok) {
                 versionSelect.innerHTML = '';
@@ -1358,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', function () {
             versionSelect.disabled = true;
 
             try {
-                const response = await fetch(`${API_URL}/api/servers/${serverId}/change-software`, {
+                const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/change-software`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -1390,7 +1420,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const fetchServerProperties = async () => {
         propertiesFormContainer.innerHTML = '<p class="text-center text-body-secondary">Loading properties...</p>';
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/properties`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/properties`);
             if (!response.ok) {
                 const data = await response.json();
                 throw new Error(data.error || 'Failed to load server properties.');
@@ -1461,7 +1491,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/properties`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/properties`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(properties),
@@ -1492,7 +1522,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Backup Settings ---
     const fetchBackupSettings = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/backups/settings`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/backups/settings`);
             if (!response.ok) throw new Error('Failed to load backup settings.');
             const settings = await response.json();
             
@@ -1513,7 +1543,7 @@ document.addEventListener('DOMContentLoaded', function () {
         };
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/backups/settings`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/backups/settings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings)
@@ -1537,7 +1567,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }).then(async (result) => {
             if (result.isConfirmed) {
                 try {
-                    const response = await fetch(`${API_URL}/api/servers/${serverId}/backups/now`, { method: 'POST' });
+                    const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/backups/now`, { method: 'POST' });
                     const resData = await response.json();
                     if (!response.ok) throw new Error(resData.error);
                     
@@ -1640,7 +1670,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const fetchTasks = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/tasks`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/tasks`);
             if (!response.ok) throw new Error('Failed to fetch tasks');
             const tasks = await response.json();
             renderTasks(tasks);
@@ -1662,7 +1692,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (result.isConfirmed) {
             try {
-                const response = await fetch(`${API_URL}/api/servers/${serverId}/tasks/${taskId}`, {
+                const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/tasks/${taskId}`, {
                     method: 'DELETE'
                 });
                 if (!response.ok) {
@@ -1770,7 +1800,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const method = isEditing ? 'PUT' : 'POST';
 
                 try {
-                    const response = await fetch(url, {
+                    const response = await authenticatedFetch(url, {
                         method: method,
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(taskData)
@@ -1814,7 +1844,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/delete`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/files/delete`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ paths: Array.from(selectedFiles) })
@@ -1854,7 +1884,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/rename`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/files/rename`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path: oldPath, new_name: newName.trim() })
@@ -1872,7 +1902,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     reapplyEulaBtn.addEventListener('click', async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/reapply-eula`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/reapply-eula`, {
                 method: 'POST',
             });
             const result = await response.json();
@@ -1905,7 +1935,7 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadBtn.disabled = true;
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/files/upload`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/files/upload`, {
                 method: 'POST',
                 body: formData,
             });
@@ -1959,7 +1989,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Shared File Explorer (for Backups, etc.) ---
     const openFileExplorer = async (path = '') => {
         try {
-            const response = await fetch(`${API_URL}/api/browse?path=${encodeURIComponent(path)}`);
+            const response = await authenticatedFetch(`${API_URL}/api/browse?path=${encodeURIComponent(path)}`);
             const data = await response.json();
 
             if (!response.ok) {
@@ -2042,7 +2072,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const fetchWhitelist = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/whitelist`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/whitelist`);
             if (!response.ok) throw new Error('Failed to fetch whitelist');
             const whitelist = await response.json();
             renderWhitelist(whitelist);
@@ -2100,7 +2130,7 @@ document.addEventListener('DOMContentLoaded', function () {
         addWhitelistBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Adding...';
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/whitelist`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/whitelist`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: username })
@@ -2133,7 +2163,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!result.isConfirmed) return;
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/whitelist/${uuid}`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/whitelist/${uuid}`, {
                 method: 'DELETE'
             });
             
@@ -2149,7 +2179,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const fetchOperators = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/operators`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/operators`);
             if (!response.ok) throw new Error('Failed to fetch operators');
             const operators = await response.json();
             renderOperators(operators);
@@ -2210,7 +2240,7 @@ document.addEventListener('DOMContentLoaded', function () {
         addOpBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Adding...';
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/operators`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/operators`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: username, level: parseInt(level) })
@@ -2243,7 +2273,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!result.isConfirmed) return;
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/operators/${uuid}`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/operators/${uuid}`, {
                 method: 'DELETE'
             });
             
@@ -2296,7 +2326,7 @@ document.addEventListener('DOMContentLoaded', function () {
         refreshAnalyticsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Refreshing...';
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/refresh`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/analytics/refresh`, {
                 method: 'POST'
             });
             
@@ -2322,7 +2352,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const fetchOnlinePlayers = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/online`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/analytics/online`);
             if (!response.ok) throw new Error('Failed to fetch online players');
             const players = await response.json();
             renderOnlinePlayers(players);
@@ -2351,7 +2381,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const fetchPlaytime = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/playtime`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/analytics/playtime`);
             if (!response.ok) throw new Error('Failed to fetch playtime data');
             const playtime = await response.json();
             renderPlaytime(playtime);
@@ -2393,7 +2423,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const fetchPeakHours = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/peak-hours`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/analytics/peak-hours`);
             if (!response.ok) throw new Error('Failed to fetch peak hours');
             const peakHours = await response.json();
             renderPeakHours(peakHours);
@@ -2444,7 +2474,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const fetchRecentSessions = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/sessions`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/analytics/sessions`);
             if (!response.ok) throw new Error('Failed to fetch sessions');
             const sessions = await response.json();
             renderRecentSessions(sessions);
@@ -2539,7 +2569,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Check if server supports plugins/mods
     const checkPluginSupport = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/supports-plugins`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/supports-plugins`);
             if (!response.ok) return;
             
             const data = await response.json();
@@ -2570,7 +2600,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Fetch installed plugins
     const fetchInstalledPlugins = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/plugins`);
             if (!response.ok) throw new Error('Failed to fetch plugins');
             
             const plugins = await response.json();
@@ -2629,7 +2659,7 @@ document.addEventListener('DOMContentLoaded', function () {
         pluginSearchResults.style.display = 'block';
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins/search?query=${encodeURIComponent(query)}`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/plugins/search?query=${encodeURIComponent(query)}`);
             if (!response.ok) throw new Error('Search failed');
             
             const results = await response.json();
@@ -2720,7 +2750,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins/install`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/plugins/install`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ project_id: projectId })
@@ -2755,7 +2785,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!result.isConfirmed) return;
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins/${encodeURIComponent(filename)}`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/plugins/${encodeURIComponent(filename)}`, {
                 method: 'DELETE'
             });
             
@@ -2818,7 +2848,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Fetch worlds list
     const fetchWorlds = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/worlds`);
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/worlds`);
             if (!response.ok) throw new Error('Failed to fetch worlds');
             
             const worlds = await response.json();
@@ -2963,7 +2993,7 @@ document.addEventListener('DOMContentLoaded', function () {
             formData.append('file', file);
             formData.append('world_name', worldName);
             
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/worlds/upload`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/worlds/upload`, {
                 method: 'POST',
                 body: formData
             });
@@ -3008,7 +3038,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/worlds/${encodeURIComponent(worldName)}/dimension/${dimension}`, {
+            const response = await authenticatedFetch(`${API_URL}/api/servers/${serverId}/worlds/${encodeURIComponent(worldName)}/dimension/${dimension}`, {
                 method: 'DELETE'
             });
             
@@ -3048,6 +3078,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const templateNameInput = document.getElementById('template-name-input');
     const templateDescInput = document.getElementById('template-desc-input');
     
+    // Get checkbox elements
+    const includeWorldCheckbox = document.getElementById('include-world');
+    const includePluginsCheckbox = document.getElementById('include-plugins');
+    const includeWhitelistCheckbox = document.getElementById('include-whitelist');
+    const includeOpsCheckbox = document.getElementById('include-ops');
+    const includeServerConfigsCheckbox = document.getElementById('include-server-configs');
+    
     const saveAsTemplate = async () => {
         const templateName = templateNameInput.value.trim();
         
@@ -3058,9 +3095,28 @@ document.addEventListener('DOMContentLoaded', function () {
         
         const description = templateDescInput.value.trim();
         
+        // Get inclusion options
+        const includeWorld = includeWorldCheckbox.checked;
+        const includePlugins = includePluginsCheckbox.checked;
+        const includeWhitelist = includeWhitelistCheckbox.checked;
+        const includeOps = includeOpsCheckbox.checked;
+        const includeServerConfigs = includeServerConfigsCheckbox.checked;
+        
+        // Build inclusion message
+        const includes = [];
+        if (includeServerConfigs) includes.push('configs');
+        if (includeWorld) includes.push('world files');
+        if (includePlugins) includes.push('plugins/mods');
+        if (includeWhitelist) includes.push('whitelist');
+        if (includeOps) includes.push('operators');
+        
+        const inclusionText = includes.length > 0 
+            ? `<br><br><small class="text-body-secondary"><strong>Including:</strong> ${includes.join(', ')}</small>` 
+            : '<br><br><small class="text-body-secondary">Only scripts and metadata will be saved.</small>';
+        
         const result = await Swal.fire({
             title: 'Save as Template?',
-            html: `Save current server configuration as template <strong>"${escapeHtml(templateName)}"</strong>?<br><br><small class="text-body-secondary">This will save server properties, start/install scripts, and server type/version.</small>`,
+            html: `Save current server configuration as template <strong>"${escapeHtml(templateName)}"</strong>?${inclusionText}`,
             icon: 'question',
             showCancelButton: true,
             confirmButtonText: 'Yes, Save',
@@ -3079,13 +3135,18 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         
         try {
-            const response = await fetch(`${API_URL}/api/templates`, {
+            const response = await authenticatedFetch(`${API_URL}/api/templates`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     server_name: serverId,
                     template_name: templateName,
-                    description: description
+                    description: description,
+                    include_world: includeWorld,
+                    include_plugins: includePlugins,
+                    include_whitelist: includeWhitelist,
+                    include_ops: includeOps,
+                    include_server_configs: includeServerConfigs
                 })
             });
             
@@ -3099,6 +3160,13 @@ document.addEventListener('DOMContentLoaded', function () {
             templateNameInput.value = '';
             templateDescInput.value = '';
             
+            // Reset checkboxes to defaults
+            includeServerConfigsCheckbox.checked = true;
+            includeWorldCheckbox.checked = false;
+            includePluginsCheckbox.checked = false;
+            includeWhitelistCheckbox.checked = false;
+            includeOpsCheckbox.checked = false;
+            
         } catch (error) {
             console.error('Error saving template:', error);
             Swal.fire('Error', error.message || 'Failed to save template', 'error');
@@ -3107,5 +3175,27 @@ document.addEventListener('DOMContentLoaded', function () {
     
     if (saveAsTemplateBtn) {
         saveAsTemplateBtn.addEventListener('click', saveAsTemplate);
+    }
+    
+    // --- Logout Functionality ---
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/api/auth/logout`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    window.location.href = 'login.html';
+                } else {
+                    console.error('Logout failed');
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Redirect anyway as the session might be invalid
+                window.location.href = 'login.html';
+            }
+        });
     }
 })();

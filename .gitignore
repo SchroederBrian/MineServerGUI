@@ -3,3 +3,7 @@
 /backend/server_configs
 /backend/server_templates
 /backend/__pycache__
+/backend/users.db
+/backend/backups.json
+/backend/scheduler.json
+/backend/config.json

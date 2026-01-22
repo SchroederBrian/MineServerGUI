@@ -3,8 +3,10 @@ import subprocess
 import json
 import requests
 import re
-from flask import Flask, jsonify, request, abort, send_from_directory
+from flask import Flask, jsonify, request, abort, send_from_directory, session
 from flask_cors import CORS
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 from threading import Thread, Lock
 import time
 import shutil
@@ -12,6 +14,8 @@ import zipfile
 import collections
 import sys
 import uuid
+import sqlite3
+import secrets
 from werkzeug.utils import secure_filename
 try:
     import psutil
@@ -22,7 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 # --- Configuration ---
 app = Flask(__name__, static_folder='..', static_url_path='')
-CORS(app)
+CORS(app, supports_credentials=True)
 
 # --- Configuration Loading ---
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
@@ -63,6 +67,90 @@ config = load_config()
 SERVERS_DIR = config['servers_dir']
 CONFIGS_DIR = config['configs_dir']
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_templates')
+
+# --- Secret Key Setup ---
+if 'secret_key' not in config:
+    config['secret_key'] = secrets.token_hex(32)
+    save_config(config)
+
+app.config['SECRET_KEY'] = config['secret_key']
+
+# --- User Authentication Setup ---
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.db')
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+class User(UserMixin):
+    def __init__(self, id, username):
+        self.id = id
+        self.username = username
+
+def init_db():
+    """Initialize the user database."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_user_by_id(user_id):
+    """Fetch user by ID."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT id, username FROM users WHERE id = ?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return User(row[0], row[1])
+    return None
+
+def get_user_by_username(username):
+    """Fetch user by username."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT id, username, password_hash FROM users WHERE username = ?', (username,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def create_user(username, password):
+    """Create a new user."""
+    password_hash = generate_password_hash(password)
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', (username, password_hash))
+        conn.commit()
+        user_id = c.lastrowid
+        conn.close()
+        return user_id
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None
+
+def has_users():
+    """Check if any users exist in the database."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT COUNT(*) FROM users')
+    count = c.fetchone()[0]
+    conn.close()
+    return count > 0
+
+@login_manager.user_loader
+def load_user(user_id):
+    return get_user_by_id(user_id)
+
+# Initialize database
+init_db()
 
 # --- Global State ---
 # This dictionary will hold the running server subprocesses
@@ -177,9 +265,84 @@ def download_jar(url, path):
     Thread(target=task, daemon=True).start()
 
 
+# --- Authentication API Endpoints ---
+
+@app.route('/api/auth/setup-required', methods=['GET'])
+def setup_required():
+    """Check if initial setup is required."""
+    return jsonify({'setup_required': not has_users()})
+
+@app.route('/api/auth/setup', methods=['POST'])
+def setup():
+    """Create the first admin user."""
+    if has_users():
+        return jsonify({'error': 'Setup already completed'}), 400
+    
+    data = request.get_json()
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    if len(password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters long'}), 400
+    
+    user_id = create_user(username, password)
+    if user_id is None:
+        return jsonify({'error': 'Failed to create user'}), 500
+    
+    return jsonify({'message': 'Admin account created successfully'}), 201
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """Login endpoint."""
+    data = request.get_json()
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    user_row = get_user_by_username(username)
+    if not user_row:
+        return jsonify({'error': 'Invalid username or password'}), 401
+    
+    user_id, stored_username, password_hash = user_row
+    
+    if not check_password_hash(password_hash, password):
+        return jsonify({'error': 'Invalid username or password'}), 401
+    
+    user = User(user_id, stored_username)
+    login_user(user)
+    
+    return jsonify({
+        'message': 'Login successful',
+        'username': stored_username
+    }), 200
+
+@app.route('/api/auth/logout', methods=['POST'])
+@login_required
+def logout():
+    """Logout endpoint."""
+    logout_user()
+    return jsonify({'message': 'Logout successful'}), 200
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    """Check authentication status."""
+    if current_user.is_authenticated:
+        return jsonify({
+            'authenticated': True,
+            'username': current_user.username
+        }), 200
+    return jsonify({'authenticated': False}), 200
+
+
 # --- API Endpoints ---
 
 @app.route('/api/servers/<server_name>', methods=['GET'])
+@login_required
 def get_server_details(server_name):
     """Gets all details for a single server."""
     # Basic sanitization for the server name itself
@@ -207,6 +370,7 @@ def get_server_details(server_name):
 
 
 @app.route('/api/servers/<server_name>/port', methods=['POST'])
+@login_required
 def update_server_port(server_name):
     """Updates the server port in the server.properties file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -256,6 +420,7 @@ def update_server_port(server_name):
 
 
 @app.route('/api/servers', methods=['GET', 'POST'])
+@login_required
 def handle_servers():
     """Handles getting the server list and creating new servers."""
     if request.method == 'POST':
@@ -334,6 +499,7 @@ def handle_servers():
 
 
 @app.route('/api/servers/<server_name>/<action>', methods=['POST'])
+@login_required
 def server_action(server_name, action):
     """Handles start, stop, and restart actions for a server."""
     if action == 'start':
@@ -352,6 +518,7 @@ def server_action(server_name, action):
 
 
 @app.route('/api/servers/<server_name>/clear-logs', methods=['POST'])
+@login_required
 def clear_logs(server_name):
     """Clears the server's log file and resets the log counter."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -401,6 +568,7 @@ def sanitize_path(base_path, user_path):
     return full_path
 
 @app.route('/api/servers/<server_name>/files', methods=['GET'])
+@login_required
 def list_files(server_name):
     """Lists files and folders in a given path."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -434,6 +602,7 @@ def list_files(server_name):
     return jsonify(items)
 
 @app.route('/api/servers/<server_name>/files/content', methods=['GET', 'POST'])
+@login_required
 def handle_file_content(server_name):
     """Gets or saves the content of a file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -491,6 +660,7 @@ def get_install_script_path(server_name):
     return os.path.join(server_config_dir, 'install_script.json')
 
 @app.route('/api/servers/<server_name>/install-script', methods=['GET', 'POST'])
+@login_required
 def handle_install_script(server_name):
     script_path = get_install_script_path(server_name)
     # Ensure the directory exists before trying to write to it
@@ -516,6 +686,7 @@ def get_start_script_path(server_name):
     return os.path.join(server_config_dir, 'start_script.json')
 
 @app.route('/api/servers/<server_name>/start-script', methods=['GET', 'POST'])
+@login_required
 def handle_start_script(server_name):
     script_path = get_start_script_path(server_name)
     # Ensure the directory exists before trying to write to it
@@ -537,6 +708,7 @@ def handle_start_script(server_name):
         return jsonify({"commands": []})
 
 @app.route('/api/servers/<server_name>/install', methods=['POST'])
+@login_required
 def run_install_script(server_name):
     """Runs the installation script for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -604,12 +776,14 @@ def run_install_script(server_name):
     return jsonify({"message": "Installation process started. Check the Logs tab for output."})
 
 @app.route('/api/servers/<server_name>/install/log', methods=['GET'])
+@login_required
 def get_install_log(server_name):
     """Retrieves the current installation log for a server."""
     return jsonify({"log": ["This endpoint is deprecated. Check the main log file."]})
 
 
 @app.route('/api/servers/<server_name>/status', methods=['GET'])
+@login_required
 def get_server_status(server_name):
     """
     Gets the status of a server.
@@ -628,6 +802,7 @@ def get_server_status(server_name):
         })
 
 @app.route('/api/servers/<server_name>/console', methods=['GET', 'POST'])
+@login_required
 def handle_console(server_name):
     """
     Handles getting console output and sending commands via screen.
@@ -665,6 +840,7 @@ def handle_console(server_name):
     })
 
 @app.route('/api/servers/<server_name>/log', methods=['GET'])
+@login_required
 def get_server_log(server_name):
     """Tails the server's latest.log file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -697,6 +873,7 @@ def not_found_error(error):
 # --- Settings and File Browsing API ---
 
 @app.route('/api/settings', methods=['GET', 'POST'])
+@login_required
 def handle_settings():
     """Handles getting and saving application settings."""
     global SERVERS_DIR, config
@@ -722,6 +899,7 @@ def handle_settings():
     return jsonify(config)
 
 @app.route('/api/browse', methods=['GET'])
+@login_required
 def browse_files():
     """An unrestricted file browser API to list directories."""
     req_path = request.args.get('path')
@@ -782,6 +960,7 @@ def get_jdk_url(version):
     return urls.get(str(version))
 
 @app.route('/api/servers/<server_name>/java/install', methods=['POST'])
+@login_required
 def install_java(server_name):
     """
     Downloads and extracts a specific JDK version for a server.
@@ -880,6 +1059,7 @@ def install_java(server_name):
     return jsonify({"message": f"Java {java_version} installation started. Check Logs tab for output."})
 
 @app.route('/api/servers/<server_name>', methods=['DELETE'])
+@login_required
 def delete_server(server_name):
     """Deletes a server after stopping it."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1020,6 +1200,7 @@ def stop_server(server_name):
         return {'error': f'Failed to stop server: {e}'}, 500
 
 @app.route('/api/servers/<server_name>/files/delete', methods=['POST'])
+@login_required
 def delete_files(server_name):
     """Deletes a list of files and/or folders."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1057,6 +1238,7 @@ def delete_files(server_name):
     return jsonify({"message": f"Successfully deleted {success_count} items."})
 
 @app.route('/api/servers/<server_name>/files/rename', methods=['POST'])
+@login_required
 def rename_file(server_name):
     """Renames a file or folder."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1090,6 +1272,7 @@ def rename_file(server_name):
         return jsonify({"error": f"Failed to rename: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/reapply-eula', methods=['POST'])
+@login_required
 def reapply_eula(server_name):
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1104,6 +1287,7 @@ def reapply_eula(server_name):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/screens', methods=['GET'])
+@login_required
 def list_screens():
     try:
         # We use 'S' instead of 's' in the command to get the full socket name
@@ -1127,6 +1311,7 @@ def list_screens():
         return jsonify({'error': f"Failed to list screens: {e.stderr}"}), 500
 
 @app.route('/api/screens/terminate-all', methods=['POST'])
+@login_required
 def terminate_all_screens():
     try:
         # This command gracefully terminates all screen sessions
@@ -1141,6 +1326,7 @@ def terminate_all_screens():
         return jsonify({'error': f"Failed to terminate screens: {e.stderr}"}), 500
 
 @app.route('/api/config', methods=['GET'])
+@login_required
 def get_config():
     try:
         with open(CONFIG_FILE, 'r') as f:
@@ -1152,6 +1338,7 @@ def get_config():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/config', methods=['POST'])
+@login_required
 def save_config_endpoint():
     global SERVERS_DIR, CONFIGS_DIR
 
@@ -1221,6 +1408,7 @@ def save_config_endpoint():
     return jsonify({'message': 'Settings saved successfully.'})
 
 @app.route('/api/minecraft/versions', methods=['GET'])
+@login_required
 def get_minecraft_versions():
     try:
         url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
@@ -1237,6 +1425,7 @@ def get_minecraft_versions():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/loaders/<loader>/versions')
+@login_required
 def get_loader_versions(loader):
     try:
         if loader == 'vanilla':
@@ -1274,6 +1463,7 @@ def get_loader_versions(loader):
         return jsonify({'error': f"Failed to fetch versions for {loader}: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/change-software', methods=['POST'])
+@login_required
 def change_server_software(server_name):
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1362,6 +1552,7 @@ def change_server_software(server_name):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/servers/<server_name>/files/upload', methods=['POST'])
+@login_required
 def upload_files(server_name):
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1441,6 +1632,7 @@ def parse_properties(file_path):
     return properties
 
 @app.route('/api/servers/<server_name>/properties', methods=['GET'])
+@login_required
 def get_server_properties_endpoint(server_name):
     """Gets the full server.properties file as a JSON object."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1455,6 +1647,7 @@ def get_server_properties_endpoint(server_name):
     return jsonify(properties)
 
 @app.route('/api/servers/<server_name>/properties', methods=['POST'])
+@login_required
 def save_server_properties_endpoint(server_name):
     """Updates the server.properties file from a JSON object."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1610,10 +1803,12 @@ class BackupManager:
 backup_manager = BackupManager()
 
 @app.route('/api/servers/<server_name>/backups/settings', methods=['GET'])
+@login_required
 def get_backup_settings(server_name):
     return jsonify(backup_manager.get_server_backup_config(server_name))
 
 @app.route('/api/servers/<server_name>/backups/settings', methods=['POST'])
+@login_required
 def save_backup_settings(server_name):
     settings = request.get_json()
     if not settings:
@@ -1622,6 +1817,7 @@ def save_backup_settings(server_name):
     return jsonify({"message": "Backup settings saved successfully."})
 
 @app.route('/api/servers/<server_name>/backups/now', methods=['POST'])
+@login_required
 def trigger_backup_now(server_name):
     """Triggers an immediate backup for a specific server."""
     try:
@@ -1759,11 +1955,13 @@ class TaskManager:
 task_manager = TaskManager()
 
 @app.route('/api/servers/<server_name>/tasks', methods=['GET'])
+@login_required
 def get_tasks(server_name):
     tasks = task_manager.get_server_tasks(server_name)
     return jsonify(tasks)
 
 @app.route('/api/servers/<server_name>/tasks', methods=['POST'])
+@login_required
 def create_task(server_name):
     data = request.get_json()
     if not data or not all(k in data for k in ['name', 'cron', 'action']):
@@ -1776,6 +1974,7 @@ def create_task(server_name):
     return jsonify(new_task), 201
 
 @app.route('/api/servers/<server_name>/tasks/<task_id>', methods=['PUT'])
+@login_required
 def update_task(server_name, task_id):
     data = request.get_json()
     if not data or not all(k in data for k in ['name', 'cron', 'action']):
@@ -1792,6 +1991,7 @@ def update_task(server_name, task_id):
     return jsonify(updated_task)
 
 @app.route('/api/servers/<server_name>/tasks/<task_id>', methods=['DELETE'])
+@login_required
 def delete_task(server_name, task_id):
     if task_manager.delete_task(server_name, task_id):
         return jsonify({"message": "Task deleted successfully"})
@@ -1888,6 +2088,7 @@ def get_uuid_from_username(username):
         return None
 
 @app.route('/api/servers/<server_name>/whitelist', methods=['GET'])
+@login_required
 def get_whitelist(server_name):
     """Get the whitelist for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1898,6 +2099,7 @@ def get_whitelist(server_name):
     return jsonify(whitelist)
 
 @app.route('/api/servers/<server_name>/whitelist', methods=['POST'])
+@login_required
 def add_to_whitelist(server_name):
     """Add a player to the whitelist."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1931,6 +2133,7 @@ def add_to_whitelist(server_name):
     return jsonify({"message": f"Player '{player_data['name']}' added to whitelist", "player": player_data}), 201
 
 @app.route('/api/servers/<server_name>/whitelist/<player_uuid>', methods=['DELETE'])
+@login_required
 def remove_from_whitelist(server_name, player_uuid):
     """Remove a player from the whitelist."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1948,6 +2151,7 @@ def remove_from_whitelist(server_name, player_uuid):
     return jsonify({"message": "Player removed from whitelist"}), 200
 
 @app.route('/api/servers/<server_name>/operators', methods=['GET'])
+@login_required
 def get_operators(server_name):
     """Get the operators list for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1958,6 +2162,7 @@ def get_operators(server_name):
     return jsonify(ops)
 
 @app.route('/api/servers/<server_name>/operators', methods=['POST'])
+@login_required
 def add_operator(server_name):
     """Add a player as operator."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2002,6 +2207,7 @@ def add_operator(server_name):
     return jsonify({"message": f"Player '{player_data['name']}' added as operator (level {level})", "operator": new_op}), 201
 
 @app.route('/api/servers/<server_name>/operators/<player_uuid>', methods=['DELETE'])
+@login_required
 def remove_operator(server_name, player_uuid):
     """Remove operator status from a player."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2134,6 +2340,7 @@ def parse_log_for_sessions(server_name):
         return analytics
 
 @app.route('/api/servers/<server_name>/analytics/refresh', methods=['POST'])
+@login_required
 def refresh_analytics(server_name):
     """Parse logs and update analytics data."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2147,6 +2354,7 @@ def refresh_analytics(server_name):
         return jsonify({"error": f"Failed to refresh analytics: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/analytics/playtime', methods=['GET'])
+@login_required
 def get_player_playtime(server_name):
     """Get player playtime statistics."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2172,6 +2380,7 @@ def get_player_playtime(server_name):
     return jsonify(playtime_list)
 
 @app.route('/api/servers/<server_name>/analytics/peak-hours', methods=['GET'])
+@login_required
 def get_peak_hours(server_name):
     """Get peak player hours statistics."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2204,6 +2413,7 @@ def get_peak_hours(server_name):
     return jsonify(hour_counts)
 
 @app.route('/api/servers/<server_name>/analytics/sessions', methods=['GET'])
+@login_required
 def get_recent_sessions(server_name):
     """Get recent player sessions."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2231,6 +2441,7 @@ def get_recent_sessions(server_name):
     return jsonify(formatted_sessions)
 
 @app.route('/api/servers/<server_name>/analytics/online', methods=['GET'])
+@login_required
 def get_online_players(server_name):
     """Get currently online players by parsing the latest log."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2286,6 +2497,7 @@ def supports_plugins_or_mods(server_name):
     return server_type in ['paper', 'purpur', 'spigot', 'bukkit', 'fabric', 'forge', 'neoforge', 'quilt']
 
 @app.route('/api/servers/<server_name>/plugins', methods=['GET'])
+@login_required
 def list_plugins(server_name):
     """Lists all installed plugins/mods for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2315,6 +2527,7 @@ def list_plugins(server_name):
     return jsonify(plugins)
 
 @app.route('/api/servers/<server_name>/plugins/search', methods=['GET'])
+@login_required
 def search_plugins(server_name):
     """Search for plugins/mods from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2376,6 +2589,7 @@ def search_plugins(server_name):
         return jsonify({"error": f"An error occurred: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/plugins/install', methods=['POST'])
+@login_required
 def install_plugin(server_name):
     """Install a plugin/mod from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2460,6 +2674,7 @@ def install_plugin(server_name):
         return jsonify({"error": f"An error occurred: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/plugins/<path:filename>', methods=['DELETE'])
+@login_required
 def delete_plugin(server_name, filename):
     """Delete a plugin/mod file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2489,6 +2704,7 @@ def delete_plugin(server_name, filename):
         return jsonify({"error": f"Failed to delete plugin: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/plugins/info/<project_id>', methods=['GET'])
+@login_required
 def get_plugin_info(server_name, project_id):
     """Get detailed information about a plugin from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2524,6 +2740,7 @@ def get_plugin_info(server_name, project_id):
         return jsonify({"error": f"Failed to fetch plugin info: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/supports-plugins', methods=['GET'])
+@login_required
 def check_plugin_support(server_name):
     """Check if the server supports plugins/mods."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2590,6 +2807,7 @@ def get_world_folders(server_path):
     return worlds
 
 @app.route('/api/servers/<server_name>/worlds', methods=['GET'])
+@login_required
 def list_worlds(server_name):
     """List all world folders in the server directory."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2603,6 +2821,7 @@ def list_worlds(server_name):
         return jsonify({"error": f"Failed to list worlds: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/worlds/<world_name>/download', methods=['GET'])
+@login_required
 def download_world(server_name, world_name):
     """Download a world folder as a ZIP file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2657,6 +2876,7 @@ def download_world(server_name, world_name):
         return jsonify({"error": f"Failed to create world download: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/worlds/upload', methods=['POST'])
+@login_required
 def upload_world(server_name):
     """Upload and extract a world ZIP file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2754,6 +2974,7 @@ def upload_world(server_name):
                 pass
 
 @app.route('/api/servers/<server_name>/worlds/<world_name>/dimension/<dimension>', methods=['DELETE'])
+@login_required
 def reset_dimension(server_name, world_name, dimension):
     """Reset a world dimension (Nether or End)."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2833,6 +3054,7 @@ def ensure_templates_dir():
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 @app.route('/api/templates', methods=['GET'])
+@login_required
 def list_templates():
     """List all saved server templates."""
     ensure_templates_dir()
@@ -2862,12 +3084,20 @@ def list_templates():
         return jsonify({"error": f"Failed to list templates: {e}"}), 500
 
 @app.route('/api/templates', methods=['POST'])
+@login_required
 def create_template():
-    """Create a template from an existing server."""
+    """Create a template from an existing server with selective content inclusion."""
     data = request.get_json()
     server_name = data.get('server_name')
     template_name = data.get('template_name')
     description = data.get('description', '')
+    
+    # Inclusion options (all default to True for backward compatibility)
+    include_world = data.get('include_world', False)
+    include_plugins = data.get('include_plugins', False)
+    include_whitelist = data.get('include_whitelist', False)
+    include_ops = data.get('include_ops', False)
+    include_server_configs = data.get('include_server_configs', True)
     
     if not server_name or not template_name:
         return jsonify({"error": "server_name and template_name are required"}), 400
@@ -2883,6 +3113,7 @@ def create_template():
     
     ensure_templates_dir()
     template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    template_data_dir = os.path.join(TEMPLATES_DIR, f'{template_id}_data')
     
     try:
         # Get server metadata
@@ -2903,7 +3134,7 @@ def create_template():
             with open(install_script_path, 'r') as f:
                 install_script = json.load(f)
         
-        # Create template
+        # Create template base
         template = {
             'name': template_name,
             'description': description,
@@ -2911,27 +3142,82 @@ def create_template():
             'version': metadata.get('version', 'Unknown'),
             'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'created_from': server_name,
+            'includes': {
+                'world': include_world,
+                'plugins': include_plugins,
+                'whitelist': include_whitelist,
+                'ops': include_ops,
+                'server_configs': include_server_configs
+            },
             'config': {
-                'properties': properties,
-                'metadata': metadata,
                 'start_script': start_script,
                 'install_script': install_script
             }
         }
         
-        # Save template
+        # Include server properties/configs if requested
+        if include_server_configs:
+            template['config']['properties'] = properties
+            template['config']['metadata'] = metadata
+        
+        # Create data directory for large files
+        os.makedirs(template_data_dir, exist_ok=True)
+        
+        # Include whitelist if requested
+        if include_whitelist:
+            whitelist_file = os.path.join(server_path, 'whitelist.json')
+            if os.path.exists(whitelist_file):
+                with open(whitelist_file, 'r') as f:
+                    template['config']['whitelist'] = json.load(f)
+        
+        # Include operators if requested
+        if include_ops:
+            ops_file = os.path.join(server_path, 'ops.json')
+            if os.path.exists(ops_file):
+                with open(ops_file, 'r') as f:
+                    template['config']['ops'] = json.load(f)
+        
+        # Include plugins/mods if requested
+        if include_plugins:
+            plugins_folder = get_plugins_folder_path(server_name)
+            if plugins_folder and os.path.exists(plugins_folder):
+                plugins_dest = os.path.join(template_data_dir, os.path.basename(plugins_folder))
+                shutil.copytree(plugins_folder, plugins_dest, dirs_exist_ok=True)
+                template['config']['has_plugins_data'] = True
+        
+        # Include world if requested
+        if include_world:
+            # Copy main world folders
+            world_folders = []
+            for world_name in ['world', 'world_nether', 'world_the_end']:
+                world_path = os.path.join(server_path, world_name)
+                if os.path.exists(world_path):
+                    world_dest = os.path.join(template_data_dir, world_name)
+                    shutil.copytree(world_path, world_dest, dirs_exist_ok=True)
+                    world_folders.append(world_name)
+            
+            if world_folders:
+                template['config']['world_folders'] = world_folders
+                template['config']['has_world_data'] = True
+        
+        # Save template JSON
         with open(template_file, 'w') as f:
             json.dump(template, f, indent=4)
         
         return jsonify({
             "message": f"Template '{template_name}' created successfully",
-            "template_id": template_id
+            "template_id": template_id,
+            "includes": template['includes']
         }), 201
         
     except Exception as e:
+        # Cleanup on error
+        if os.path.exists(template_data_dir):
+            shutil.rmtree(template_data_dir)
         return jsonify({"error": f"Failed to create template: {e}"}), 500
 
 @app.route('/api/templates/<template_id>', methods=['GET'])
+@login_required
 def get_template(template_id):
     """Get a specific template."""
     ensure_templates_dir()
@@ -2951,24 +3237,33 @@ def get_template(template_id):
         return jsonify({"error": f"Failed to load template: {e}"}), 500
 
 @app.route('/api/templates/<template_id>', methods=['DELETE'])
+@login_required
 def delete_template(template_id):
-    """Delete a template."""
+    """Delete a template and its associated data."""
     ensure_templates_dir()
     
     # Sanitize template ID
     template_id = secure_filename(template_id)
     template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    template_data_dir = os.path.join(TEMPLATES_DIR, f'{template_id}_data')
     
     if not os.path.exists(template_file):
         return jsonify({"error": "Template not found"}), 404
     
     try:
+        # Delete template JSON file
         os.remove(template_file)
+        
+        # Delete template data directory if it exists
+        if os.path.exists(template_data_dir):
+            shutil.rmtree(template_data_dir)
+        
         return jsonify({"message": f"Template '{template_id}' deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": f"Failed to delete template: {e}"}), 500
 
 @app.route('/api/templates/<template_id>/export', methods=['GET'])
+@login_required
 def export_template(template_id):
     """Export a template as downloadable JSON."""
     ensure_templates_dir()
@@ -2991,6 +3286,7 @@ def export_template(template_id):
         return jsonify({"error": f"Failed to export template: {e}"}), 500
 
 @app.route('/api/templates/import', methods=['POST'])
+@login_required
 def import_template():
     """Import a template from uploaded JSON file."""
     ensure_templates_dir()
@@ -3043,8 +3339,9 @@ def import_template():
         return jsonify({"error": f"Failed to import template: {e}"}), 500
 
 @app.route('/api/servers/create-from-template', methods=['POST'])
+@login_required
 def create_server_from_template():
-    """Create a new server from a template."""
+    """Create a new server from a template with all included content."""
     data = request.get_json()
     template_id = data.get('template_id')
     server_name = data.get('server_name')
@@ -3069,6 +3366,7 @@ def create_server_from_template():
     # Load template
     template_id = secure_filename(template_id)
     template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    template_data_dir = os.path.join(TEMPLATES_DIR, f'{template_id}_data')
     
     if not os.path.exists(template_file):
         return jsonify({"error": "Template not found"}), 404
@@ -3082,22 +3380,34 @@ def create_server_from_template():
         
         # Apply template configuration
         config_data = template.get('config', {})
+        includes = template.get('includes', {})
         
         # Write EULA
         with open(os.path.join(server_path, 'eula.txt'), 'w') as f:
             f.write('eula=true\n')
         
-        # Write server.properties with template values
+        # Write server.properties with template values OR create default
         properties = config_data.get('properties', {})
-        properties['server-port'] = str(port)  # Override port with new value
+        properties['server-port'] = str(port)  # Always override port with new value
         
         props_file = os.path.join(server_path, 'server.properties')
         with open(props_file, 'w') as f:
-            for key, value in properties.items():
-                f.write(f"{key}={value}\n")
+            if properties:
+                for key, value in properties.items():
+                    f.write(f"{key}={value}\n")
+            else:
+                # Create minimal properties if none in template
+                f.write(f"server-port={port}\n")
+                f.write("motd=Server created from template\n")
         
         # Write metadata
         metadata = config_data.get('metadata', {})
+        if not metadata:
+            # Create minimal metadata if none in template
+            metadata = {
+                'server_type': template.get('server_type', 'vanilla'),
+                'version': template.get('version', '1.21.1')
+            }
         metadata['created_from_template'] = template_id
         write_server_metadata(server_path, metadata)
         
@@ -3118,6 +3428,41 @@ def create_server_from_template():
             with open(install_script_path, 'w') as f:
                 json.dump(install_script, f, indent=4)
         
+        # Restore whitelist if included
+        if includes.get('whitelist') and 'whitelist' in config_data:
+            whitelist_file = os.path.join(server_path, 'whitelist.json')
+            with open(whitelist_file, 'w') as f:
+                json.dump(config_data['whitelist'], f, indent=2)
+        
+        # Restore operators if included
+        if includes.get('ops') and 'ops' in config_data:
+            ops_file = os.path.join(server_path, 'ops.json')
+            with open(ops_file, 'w') as f:
+                json.dump(config_data['ops'], f, indent=2)
+        
+        # Restore plugins/mods if included
+        if includes.get('plugins') and config_data.get('has_plugins_data'):
+            # Determine plugin folder name based on server type
+            server_type = metadata.get('server_type', 'vanilla')
+            if server_type in ['paper', 'purpur', 'spigot', 'bukkit']:
+                plugins_folder_name = 'plugins'
+            else:
+                plugins_folder_name = 'mods'
+            
+            plugins_source = os.path.join(template_data_dir, plugins_folder_name)
+            if os.path.exists(plugins_source):
+                plugins_dest = os.path.join(server_path, plugins_folder_name)
+                shutil.copytree(plugins_source, plugins_dest)
+        
+        # Restore world if included
+        if includes.get('world') and config_data.get('has_world_data'):
+            world_folders = config_data.get('world_folders', [])
+            for world_name in world_folders:
+                world_source = os.path.join(template_data_dir, world_name)
+                if os.path.exists(world_source):
+                    world_dest = os.path.join(server_path, world_name)
+                    shutil.copytree(world_source, world_dest)
+        
         # Download server JAR
         server_type = metadata.get('server_type', 'vanilla')
         version = metadata.get('version', '1.21.1')
@@ -3125,9 +3470,27 @@ def create_server_from_template():
         jar_path = os.path.join(server_path, 'server.jar')
         download_jar(jar_url, jar_path)
         
+        # Build message about what was included
+        included_items = []
+        if includes.get('world'):
+            included_items.append('world')
+        if includes.get('plugins'):
+            included_items.append('plugins/mods')
+        if includes.get('whitelist'):
+            included_items.append('whitelist')
+        if includes.get('ops'):
+            included_items.append('operators')
+        if includes.get('server_configs'):
+            included_items.append('configs')
+        
+        message = f"Server '{server_name}' created from template '{template.get('name', template_id)}'"
+        if included_items:
+            message += f" with {', '.join(included_items)}"
+        
         return jsonify({
-            "message": f"Server '{server_name}' created from template '{template.get('name', template_id)}'",
-            "server_name": server_name
+            "message": message,
+            "server_name": server_name,
+            "included": included_items
         }), 201
         
     except Exception as e:

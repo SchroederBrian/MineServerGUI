@@ -2,7 +2,7 @@
   <br/>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/preview.png">
-    <img alt="Showcase of the Minecraft Server GUI" width="800" src="assets/preview.png">
+    <img alt="Showcase of the Minecraft Server GUI" width="800" src="assets/preview.png" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
   </picture>
   <br/>
   <br/>
@@ -26,12 +26,18 @@ Tired of wrestling with command lines and complex config files? **MineServerGUI*
 
 Stop memorizing commands and start managing your servers visually.
 
+### 📸 Preview
+<p align="center">
+  <img src="assets/preview2.png" alt="MineServerGUI Dashboard Preview" width="600" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+</p>
+
 <br/>
 
 ## ✨ Key Features
 
 | Feature                      | Description                                                                                                                              |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔐 **User Authentication**    | Secure login system protects your dashboard. Create an admin account on first launch, with password hashing and session management.      |
 | 🎮 **One-Click Creation**     | Spin up new servers in seconds. Choose from Paper, Purpur, Fabric, Forge, and more with just a few clicks.                               |
 | 📋 **Server Templates**      | Save and reuse server configurations. Create templates from existing servers, share them via JSON export/import, and deploy multiple identical servers instantly. |
 | 📊 **Real-Time Dashboard**   | Monitor all your servers at a glance. Live status, player counts, and resource usage keep you informed.                                    |
@@ -57,6 +63,27 @@ Ready to take control? Follow these simple steps to get MineServerGUI up and run
 -   **Backend Dependencies**: All required packages are listed in `backend/requirements.txt`.
 -   **(Windows Users)**: **Windows Subsystem for Linux (WSL)** is highly recommended. The server management backend relies on `screen` for session management, which is not natively available on Windows.
 
+### 📦 Docker Installation (Recommended)
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/SchroederBrian/MineServerGUI
+    cd MineServerGUI
+    ```
+2.  **Build the Docker Image:**
+    ```bash
+    docker build -t mineservergui .
+    ```
+3.  **Run the Container:**
+    ```bash
+    docker run -p 5000:5000 mineservergui
+    ```
+4.  **Access the Dashboard:**
+    Navigate to `http://localhost:5000` in your web browser.
+5.  **First-Time Setup:**
+    On first launch, you'll be redirected to the setup page.
+    Create an admin account with a username and password (minimum 6 characters).
+    After setup, login with your credentials to access the dashboard.
+
 ### Installation & Launch
 
 1.  **Clone the Repository:**
@@ -71,7 +98,7 @@ Ready to take control? Follow these simple steps to get MineServerGUI up and run
     
     # (Recommended) Create and activate a virtual environment
     python -m venv venv
-    source venv/bin/activate # On Windows: venv\Scripts\activate
+    source venv/bin/activate
     
     # Install dependencies
     pip install -r requirements.txt
@@ -79,13 +106,16 @@ Ready to take control? Follow these simple steps to get MineServerGUI up and run
 
 3.  **Run the Server:**
     ```bash
-    flask run
+    python -m flask run
     ```
-    The backend will start, typically on `http://127.0.0.1:5000`.
 
 4.  **Launch the Frontend:**
-    -   Navigate back to the root directory of the project.
-    -   Open the `index.html` file directly in your web browser.
+    -   Navigate to `http://127.0.0.1:5000` in your web browser.
+
+5.  **First-Time Setup:**
+    -   On first launch, you'll be redirected to the setup page.
+    -   Create an admin account with a username and password (minimum 6 characters).
+    -   After setup, login with your credentials to access the dashboard.
 
 That's it! You should now see the dashboard and can begin creating and managing your Minecraft servers.
 
@@ -127,4 +157,3 @@ If you have a suggestion that would make this better, please fork the repo and c
 ## 📄 License
 
 Distributed under the MIT License. See `LICENSE` for more information.
-(Note: You'll need to add a `LICENSE` file if you don't have one). 

@@ -1,7 +1,31 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const serverListElement = document.getElementById('serverList');
     const createServerBtn = document.getElementById('createServerBtn');
     const API_URL = 'http://127.0.0.1:5000';
+
+    // --- Authentication Check ---
+    async function checkAuthentication() {
+        try {
+            const response = await fetch(`${API_URL}/api/auth/status`, {
+                credentials: 'include'
+            });
+            const data = await response.json();
+            
+            if (!data.authenticated) {
+                window.location.href = 'login.html';
+                return false;
+            }
+            return true;
+        } catch (error) {
+            console.error('Authentication check failed:', error);
+            window.location.href = 'login.html';
+            return false;
+        }
+    }
+    
+    // Check authentication before initializing the page
+    const isAuthenticated = await checkAuthentication();
+    if (!isAuthenticated) return;
 
     // --- Panorama Effect ---
     const setupPanoramaEffect = async () => {
@@ -9,7 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!panorama) return;
 
         try {
-            const response = await fetch(`${API_URL}/api/config`);
+            const response = await fetch(`${API_URL}/api/config`, {
+                credentials: 'include'
+            });
             const config = await response.json();
             const intensity = config.panorama_intensity || 1.5;
             
@@ -82,7 +108,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchServers = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/servers`);
+            const response = await fetch(`${API_URL}/api/servers`, {
+                credentials: 'include'
+            });
             if (!response.ok) throw new Error('Network response was not ok');
             servers = await response.json();
             renderServers();
@@ -177,6 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`${API_URL}/api/servers`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify(serverData)
             });
                     const res = await response.json();
@@ -229,7 +258,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }).then(async (result) => {
                 if (result.isConfirmed) {
                 try {
-                    const response = await fetch(`${API_URL}/api/servers/${serverId}`, { method: 'DELETE' });
+                    const response = await fetch(`${API_URL}/api/servers/${serverId}`, { 
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
                     if (!response.ok) {
                         const errorData = await response.json();
                         throw new Error(errorData.error || 'Failed to delete server');
@@ -261,7 +293,10 @@ document.addEventListener('DOMContentLoaded', () => {
         button.disabled = true;
 
         try {
-            const response = await fetch(`${API_URL}/api/servers/${serverId}/${action}`, { method: 'POST' });
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/${action}`, { 
+                method: 'POST',
+                credentials: 'include'
+            });
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || `Failed to ${action} server`);
@@ -277,6 +312,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial fetch
     fetchServers();
+    
+    // --- Logout Functionality ---
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/api/auth/logout`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    window.location.href = 'login.html';
+                } else {
+                    console.error('Logout failed');
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Redirect anyway as the session might be invalid
+                window.location.href = 'login.html';
+            }
+        });
+    }
     
     // ===========================
     // Server Templates Management
@@ -299,7 +356,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fetch templates
     const fetchTemplates = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/templates`);
+            const response = await fetch(`${API_URL}/api/templates`, {
+                credentials: 'include'
+            });
             if (!response.ok) throw new Error('Failed to fetch templates');
             
             templates = await response.json();
@@ -328,6 +387,30 @@ document.addEventListener('DOMContentLoaded', () => {
             const templateItem = document.createElement('div');
             templateItem.className = 'list-group-item list-group-item-dark';
             
+            // Build inclusion badges
+            const includes = template.includes || {};
+            const inclusionBadges = [];
+            
+            if (includes.server_configs) {
+                inclusionBadges.push('<span class="badge bg-primary" title="Server configs included"><i class="fas fa-cog"></i></span>');
+            }
+            if (includes.world) {
+                inclusionBadges.push('<span class="badge bg-success" title="World files included"><i class="fas fa-globe"></i></span>');
+            }
+            if (includes.plugins) {
+                inclusionBadges.push('<span class="badge bg-info" title="Plugins/mods included"><i class="fas fa-puzzle-piece"></i></span>');
+            }
+            if (includes.whitelist) {
+                inclusionBadges.push('<span class="badge bg-warning" title="Whitelist included"><i class="fas fa-list"></i></span>');
+            }
+            if (includes.ops) {
+                inclusionBadges.push('<span class="badge bg-danger" title="Operators included"><i class="fas fa-user-shield"></i></span>');
+            }
+            
+            const inclusionHtml = inclusionBadges.length > 0 
+                ? `<div class="mt-1">${inclusionBadges.join(' ')}</div>` 
+                : '';
+            
             templateItem.innerHTML = `
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1">
@@ -337,6 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="badge bg-secondary">${escapeHtml(template.server_type)}</span>
                             <span class="badge bg-secondary">${escapeHtml(template.version)}</span>
                         </small>
+                        ${inclusionHtml}
                     </div>
                     <div class="btn-group-vertical btn-group-sm">
                         <button class="btn btn-outline-success use-template-btn" data-template-id="${escapeHtml(template.id)}" title="Use Template">
@@ -433,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`${API_URL}/api/servers/create-from-template`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     template_id: templateId,
                     server_name: serverName,
@@ -481,7 +566,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         try {
             const response = await fetch(`${API_URL}/api/templates/${encodeURIComponent(templateId)}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                credentials: 'include'
             });
             
             const data = await response.json();
@@ -525,6 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const response = await fetch(`${API_URL}/api/templates/import`, {
                 method: 'POST',
+                credentials: 'include',
                 body: formData
             });
             

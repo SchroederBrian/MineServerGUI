@@ -19,10 +19,13 @@
     <div class="panorama-background"></div>
 
     <div class="container my-5 main-container">
-        <div class="mb-4">
+        <div class="mb-4 d-flex justify-content-between align-items-center">
             <a href="index.html" class="btn btn-outline-secondary">
                 <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
             </a>
+            <button id="logoutBtn" class="btn btn-outline-danger" title="Logout">
+                <i class="fas fa-sign-out-alt me-2"></i>Logout
+            </button>
         </div>
 
         <div class="row g-4">
@@ -469,13 +472,68 @@
                                 <!-- Save as Template Section -->
                                 <div class="p-3 rounded bg-dark-tertiary mb-4">
                                     <h4 class="h5 mb-3"><i class="fas fa-save me-2"></i>Save as Template</h4>
-                                    <p class="text-body-secondary small mb-3">Save this server's configuration as a reusable template</p>
+                                    <p class="text-body-secondary small mb-3">Save this server's configuration as a reusable template with selective content</p>
                                     <div class="row g-2">
                                         <div class="col-md-6">
                                             <input type="text" id="template-name-input" class="form-control" placeholder="Template name">
                                         </div>
                                         <div class="col-md-6">
                                             <input type="text" id="template-desc-input" class="form-control" placeholder="Description (optional)">
+                                        </div>
+                                        <div class="col-12">
+                                            <div class="card bg-dark text-white mb-3">
+                                                <div class="card-header">
+                                                    <small class="fw-bold">Include in Template:</small>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="row g-2">
+                                                        <div class="col-md-6">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" id="include-server-configs" checked>
+                                                                <label class="form-check-label" for="include-server-configs">
+                                                                    <i class="fas fa-cog me-1"></i> Server Configs & Properties
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" id="include-world">
+                                                                <label class="form-check-label" for="include-world">
+                                                                    <i class="fas fa-globe me-1"></i> World Files
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" id="include-plugins">
+                                                                <label class="form-check-label" for="include-plugins">
+                                                                    <i class="fas fa-puzzle-piece me-1"></i> Plugins/Mods
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" id="include-whitelist">
+                                                                <label class="form-check-label" for="include-whitelist">
+                                                                    <i class="fas fa-list me-1"></i> Whitelist
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" id="include-ops">
+                                                                <label class="form-check-label" for="include-ops">
+                                                                    <i class="fas fa-user-shield me-1"></i> Operators
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <small class="text-body-secondary d-block mt-2">
+                                                        <i class="fas fa-info-circle me-1"></i>
+                                                        Select which components to include in the template. Scripts are always included.
+                                                    </small>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div class="col-12">
                                             <button id="save-as-template-btn" class="btn btn-success w-100">

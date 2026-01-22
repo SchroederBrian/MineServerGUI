@@ -13,17 +13,19 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy backend requirements and install Python dependencies
-COPY backend/requirements.txt /app/backend/requirements.txt
+COPY ../backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 # Copy application files
-COPY backend/ /app/backend/
-COPY index.html /app/index.html
-COPY server-details.html /app/server-details.html
-COPY credits.html /app/credits.html
-COPY js/ /app/js/
-COPY css/ /app/css/
-COPY assets/ /app/assets/
+COPY ../backend/ /app/backend/
+COPY ../index.html /app/index.html
+COPY ../server-details.html /app/server-details.html
+COPY ../login.html /app/login.html
+COPY ../setup.html /app/setup.html
+COPY ../credits.html /app/credits.html
+COPY ../js/ /app/js/
+COPY ../css/ /app/css/
+COPY ../assets/ /app/assets/
 
 # Create directories for data persistence
 RUN mkdir -p /app/servers /app/backend/server_configs /app/backend/server_templates
