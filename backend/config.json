@@ -1,6 +1,6 @@
 {
-    "servers_dir": "/mnt/c/Users/bobby/Downloads/Mineservergui/MineServerGUI/servers",
-    "configs_dir": "/mnt/c/Users/bobby/Downloads/Mineservergui/MineServerGUI/backend/server_configs",
+    "servers_dir": "/path/to/your/MineServerGUI/servers",
+    "configs_dir": "/path/to/your/MineServerGUI/server_configs",
     "migrated_scripts_to_config_dir": true,
     "panorama_intensity": 1.05,
     "host": "0.0.0.0",
