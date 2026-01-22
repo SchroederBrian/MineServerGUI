@@ -1,0 +1,49 @@
+services:
+  mineservergui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: mineservergui
+    ports:
+      - "${EXTERNAL_PORT:-5000}:5000"
+    volumes:
+      # Persist server data
+      - ./data/servers:/app/servers
+      - ./data/server_configs:/app/backend/server_configs
+      - ./data/server_templates:/app/backend/server_templates
+      # Optional: Mount backups directory
+      - ./data/backups:/app/backend/backups
+    environment:
+      # Server Configuration
+      - SERVERS_DIR=/app/servers
+      - CONFIGS_DIR=/app/backend/server_configs
+      - TEMPLATES_DIR=/app/backend/server_templates
+      
+      # Flask Configuration
+      - HOST=0.0.0.0
+      - PORT=5000
+      - DEBUG=${DEBUG:-false}
+      
+      # UI Configuration
+      - PANORAMA_INTENSITY=${PANORAMA_INTENSITY:-1.05}
+    restart: unless-stopped
+    networks:
+      - mineserver-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/servers"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  mineserver-network:
+    driver: bridge
+
+volumes:
+  servers:
+    driver: local
+  server_configs:
+    driver: local
+  server_templates:
+    driver: local

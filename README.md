@@ -33,10 +33,15 @@ Stop memorizing commands and start managing your servers visually.
 | Feature                      | Description                                                                                                                              |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | 🎮 **One-Click Creation**     | Spin up new servers in seconds. Choose from Paper, Purpur, Fabric, Forge, and more with just a few clicks.                               |
+| 📋 **Server Templates**      | Save and reuse server configurations. Create templates from existing servers, share them via JSON export/import, and deploy multiple identical servers instantly. |
 | 📊 **Real-Time Dashboard**   | Monitor all your servers at a glance. Live status, player counts, and resource usage keep you informed.                                    |
+| 🔌 **Plugin/Mod Manager**    | Browse and install plugins/mods from Modrinth with one click. Automatically detects server type and shows compatible add-ons.             |
+| 🌍 **World Management**      | Upload, download, and manage world folders. Download worlds as ZIP, upload new worlds, and reset Nether/End dimensions with built-in backups. |
 | 🛠️ **Advanced Script Editor** | Visually manage your installation and startup scripts. Reorder, edit, and delete commands with an intuitive drag-and-drop style UI.      |
 | 📂 **In-Browser File Explorer** | No more FTP! Manage server files directly from the browser. Upload, download, rename, and edit files on the fly.                        |
 | ⌨️ **Live Console & Logs**   | View live server logs and send commands directly to your running server through the integrated terminal.                                     |
+| 👥 **Player Management**     | Manage whitelist and operators with player head previews. Add players by username with automatic UUID lookup via Mojang API.              |
+| 📈 **Server Analytics**      | Track player activity, session history, playtime statistics, and peak hours. Monitor server performance and player engagement over time.   |
 | ⚙️ **Effortless Configuration**| Manage server ports, EULA, and other settings through the UI. Includes automatic port-conflict detection to prevent headaches.        |
 | 🎨 **Modern & Responsive UI** | A clean, dark-themed interface built with Bootstrap and SweetAlert2 makes managing servers a pleasure on any device.                      |
 

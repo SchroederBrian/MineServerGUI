@@ -277,4 +277,297 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial fetch
     fetchServers();
+    
+    // ===========================
+    // Server Templates Management
+    // ===========================
+    
+    const templatesList = document.getElementById('templatesList');
+    const createFromTemplateBtn = document.getElementById('createFromTemplateBtn');
+    const importTemplateBtn = document.getElementById('importTemplateBtn');
+    const createFromTemplateModal = new bootstrap.Modal(document.getElementById('createFromTemplateModal'));
+    const importTemplateModal = new bootstrap.Modal(document.getElementById('importTemplateModal'));
+    const templateSelect = document.getElementById('template-select');
+    const newServerName = document.getElementById('new-server-name');
+    const newServerPort = document.getElementById('new-server-port');
+    const confirmCreateFromTemplate = document.getElementById('confirm-create-from-template');
+    const templateFileInput = document.getElementById('template-file-input');
+    const confirmImportTemplate = document.getElementById('confirm-import-template');
+    
+    let templates = [];
+    
+    // Fetch templates
+    const fetchTemplates = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/templates`);
+            if (!response.ok) throw new Error('Failed to fetch templates');
+            
+            templates = await response.json();
+            renderTemplates();
+            updateTemplateSelect();
+        } catch (error) {
+            console.error('Error fetching templates:', error);
+            if (templatesList) {
+                templatesList.innerHTML = '<div class="text-danger text-center p-3">Failed to load templates</div>';
+            }
+        }
+    };
+    
+    // Render templates list
+    const renderTemplates = () => {
+        if (!templatesList) return;
+        
+        templatesList.innerHTML = '';
+        
+        if (!templates || templates.length === 0) {
+            templatesList.innerHTML = '<div class="text-body-secondary text-center p-3">No templates yet</div>';
+            return;
+        }
+        
+        templates.forEach(template => {
+            const templateItem = document.createElement('div');
+            templateItem.className = 'list-group-item list-group-item-dark';
+            
+            templateItem.innerHTML = `
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1"><i class="fas fa-file-code me-2"></i>${escapeHtml(template.name)}</h6>
+                        <p class="mb-1 small text-body-secondary">${escapeHtml(template.description || 'No description')}</p>
+                        <small class="text-body-secondary">
+                            <span class="badge bg-secondary">${escapeHtml(template.server_type)}</span>
+                            <span class="badge bg-secondary">${escapeHtml(template.version)}</span>
+                        </small>
+                    </div>
+                    <div class="btn-group-vertical btn-group-sm">
+                        <button class="btn btn-outline-success use-template-btn" data-template-id="${escapeHtml(template.id)}" title="Use Template">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <button class="btn btn-outline-primary export-template-btn" data-template-id="${escapeHtml(template.id)}" title="Export">
+                            <i class="fas fa-file-export"></i>
+                        </button>
+                        <button class="btn btn-outline-danger delete-template-btn" data-template-id="${escapeHtml(template.id)}" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            templatesList.appendChild(templateItem);
+        });
+        
+        // Add event listeners
+        document.querySelectorAll('.use-template-btn').forEach(btn => {
+            btn.addEventListener('click', () => openCreateFromTemplate(btn.dataset.templateId));
+        });
+        
+        document.querySelectorAll('.export-template-btn').forEach(btn => {
+            btn.addEventListener('click', () => exportTemplate(btn.dataset.templateId));
+        });
+        
+        document.querySelectorAll('.delete-template-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteTemplate(btn.dataset.templateId));
+        });
+    };
+    
+    // Update template select dropdown
+    const updateTemplateSelect = () => {
+        if (!templateSelect) return;
+        
+        templateSelect.innerHTML = '';
+        
+        if (!templates || templates.length === 0) {
+            templateSelect.innerHTML = '<option value="">No templates available</option>';
+            return;
+        }
+        
+        templateSelect.innerHTML = '<option value="">Select a template...</option>';
+        templates.forEach(template => {
+            const option = document.createElement('option');
+            option.value = template.id;
+            option.textContent = `${template.name} (${template.server_type} ${template.version})`;
+            templateSelect.appendChild(option);
+        });
+    };
+    
+    // Open create from template modal
+    const openCreateFromTemplate = (templateId = null) => {
+        if (templateId) {
+            templateSelect.value = templateId;
+        }
+        createFromTemplateModal.show();
+    };
+    
+    // Create server from template
+    const createFromTemplate = async () => {
+        const templateId = templateSelect.value;
+        const serverName = newServerName.value.trim();
+        const port = parseInt(newServerPort.value);
+        
+        if (!templateId) {
+            Swal.fire('Error', 'Please select a template', 'error');
+            return;
+        }
+        
+        if (!serverName) {
+            Swal.fire('Error', 'Please enter a server name', 'error');
+            return;
+        }
+        
+        if (!port || port < 1024 || port > 65535) {
+            Swal.fire('Error', 'Port must be between 1024 and 65535', 'error');
+            return;
+        }
+        
+        createFromTemplateModal.hide();
+        
+        Swal.fire({
+            title: 'Creating Server...',
+            text: `Creating server from template...`,
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/create-from-template`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    template_id: templateId,
+                    server_name: serverName,
+                    port: port
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to create server');
+            }
+            
+            await Swal.fire('Success!', data.message, 'success');
+            newServerName.value = '';
+            newServerPort.value = '25565';
+            fetchServers();
+            
+        } catch (error) {
+            console.error('Error creating server from template:', error);
+            Swal.fire('Error', error.message || 'Failed to create server', 'error');
+        }
+    };
+    
+    // Export template
+    const exportTemplate = (templateId) => {
+        const downloadUrl = `${API_URL}/api/templates/${encodeURIComponent(templateId)}/export`;
+        window.location.href = downloadUrl;
+    };
+    
+    // Delete template
+    const deleteTemplate = async (templateId) => {
+        const template = templates.find(t => t.id === templateId);
+        
+        const result = await Swal.fire({
+            title: 'Delete Template?',
+            text: `Are you sure you want to delete "${template?.name || templateId}"?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Delete',
+            cancelButtonText: 'Cancel',
+            confirmButtonColor: '#dc3545'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        try {
+            const response = await fetch(`${API_URL}/api/templates/${encodeURIComponent(templateId)}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Deletion failed');
+            }
+            
+            await Swal.fire('Deleted!', data.message, 'success');
+            fetchTemplates();
+            
+        } catch (error) {
+            console.error('Error deleting template:', error);
+            Swal.fire('Error', error.message || 'Failed to delete template', 'error');
+        }
+    };
+    
+    // Import template
+    const importTemplate = async () => {
+        const file = templateFileInput.files[0];
+        
+        if (!file) {
+            Swal.fire('Error', 'Please select a JSON file', 'error');
+            return;
+        }
+        
+        importTemplateModal.hide();
+        
+        Swal.fire({
+            title: 'Importing...',
+            text: 'Importing template...',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch(`${API_URL}/api/templates/import`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Import failed');
+            }
+            
+            await Swal.fire('Success!', data.message, 'success');
+            templateFileInput.value = '';
+            fetchTemplates();
+            
+        } catch (error) {
+            console.error('Error importing template:', error);
+            Swal.fire('Error', error.message || 'Failed to import template', 'error');
+        }
+    };
+    
+    // Event listeners
+    if (createFromTemplateBtn) {
+        createFromTemplateBtn.addEventListener('click', () => openCreateFromTemplate());
+    }
+    
+    if (importTemplateBtn) {
+        importTemplateBtn.addEventListener('click', () => importTemplateModal.show());
+    }
+    
+    if (confirmCreateFromTemplate) {
+        confirmCreateFromTemplate.addEventListener('click', createFromTemplate);
+    }
+    
+    if (confirmImportTemplate) {
+        confirmImportTemplate.addEventListener('click', importTemplate);
+    }
+    
+    // Fetch templates on page load
+    fetchTemplates();
+    
+    // Utility function for escaping HTML
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
 }); 

@@ -1,6 +1,9 @@
 {
-    "servers_dir": "/mnt/c/Users/bobby/Desktop/test",
-    "configs_dir": "/mnt/c/Users/bobby/Documents/AI/backend/server_configs",
+    "servers_dir": "/path/to/your/MineServerGUI",
+    "configs_dir": "/path/to/your/MineServerGUI/server_configs",
     "migrated_scripts_to_config_dir": true,
-    "panorama_intensity": 1.05
+    "panorama_intensity": 1.05,
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": false
 }

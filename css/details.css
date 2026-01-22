@@ -122,4 +122,109 @@
 .file-list-container.dragover {
     border: 2px dashed #0d6efd; /* A dashed blue border */
     background-color: rgba(13, 110, 253, 0.1); /* A light blue background tint */
+}
+
+/* Player Management Styles */
+.list-group-item-dark img {
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.list-group-item-dark:hover img {
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+    transition: all 0.2s ease;
+}
+
+/* Analytics Styles */
+#peak-hours-chart .rounded {
+    transition: all 0.3s ease;
+}
+
+#peak-hours-chart .rounded:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Online player badges */
+#online-players-list .badge {
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+    animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Playtime table enhancements */
+#playtime-table-body tr {
+    transition: background-color 0.2s ease;
+}
+
+#playtime-table-body tr:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Session items */
+#recent-sessions-container .list-group-item {
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+#recent-sessions-container .list-group-item:hover {
+    transform: translateX(5px);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Card enhancements for analytics */
+.card.bg-dark-tertiary {
+    transition: box-shadow 0.3s ease;
+}
+
+.card.bg-dark-tertiary:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Alert styling for permission levels */
+.alert-sm {
+    padding: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    border-left: 3px solid #0dcaf0;
+}
+
+/* Responsive improvements for analytics */
+@media (max-width: 768px) {
+    #peak-hours-chart .d-flex {
+        overflow-x: auto;
+        flex-wrap: nowrap !important;
+    }
+    
+    #playtime-table-container {
+        overflow-x: auto;
+    }
+}
+
+/* World Management Styles */
+.bg-purple {
+    background-color: #6f42c1 !important;
+}
+
+.text-purple {
+    color: #6f42c1 !important;
+}
+
+#worlds-list-container .card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#worlds-list-container .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 } 

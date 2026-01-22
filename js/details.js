@@ -523,14 +523,13 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const renderBreadcrumb = (path) => {
-        breadcrumbEl.innerHTML = '';
+        // Clear existing breadcrumb items except the root item
+        const breadcrumbItems = breadcrumbEl.querySelectorAll('.breadcrumb-item');
+        for (let i = 1; i < breadcrumbItems.length; i++) {
+            breadcrumbItems[i].remove();
+        }
+
         const parts = path.split('/').filter(p => p);
-        
-        const rootItem = document.createElement('li');
-        rootItem.className = 'breadcrumb-item';
-        rootItem.innerHTML = `<a href="#">root</a>`;
-        rootItem.onclick = (e) => { e.preventDefault(); fetchFiles('.'); };
-        breadcrumbEl.appendChild(rootItem);
 
         let currentCrumbPath = '';
         parts.forEach((part, index) => {
@@ -2027,4 +2026,1086 @@ document.addEventListener('DOMContentLoaded', function () {
     if (addTaskBtn) {
         addTaskBtn.addEventListener('click', () => openTaskModal());
     }
-});
+
+    // --- Player Management (Whitelist & Operators) ---
+    
+    const whitelistUsernameInput = document.getElementById('whitelist-username-input');
+    const addWhitelistBtn = document.getElementById('add-whitelist-btn');
+    const whitelistContainer = document.getElementById('whitelist-container');
+    const noWhitelistMsg = document.getElementById('no-whitelist-msg');
+    
+    const opUsernameInput = document.getElementById('op-username-input');
+    const opLevelSelect = document.getElementById('op-level-select');
+    const addOpBtn = document.getElementById('add-op-btn');
+    const operatorsContainer = document.getElementById('operators-container');
+    const noOperatorsMsg = document.getElementById('no-operators-msg');
+    
+    const fetchWhitelist = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/whitelist`);
+            if (!response.ok) throw new Error('Failed to fetch whitelist');
+            const whitelist = await response.json();
+            renderWhitelist(whitelist);
+        } catch (error) {
+            console.error('Error fetching whitelist:', error);
+            whitelistContainer.innerHTML = '<div class="text-danger text-center p-3">Failed to load whitelist</div>';
+        }
+    };
+    
+    const renderWhitelist = (whitelist) => {
+        whitelistContainer.innerHTML = '';
+        
+        if (!whitelist || whitelist.length === 0) {
+            noWhitelistMsg.style.display = 'block';
+            noWhitelistMsg.textContent = 'No players whitelisted yet';
+            whitelistContainer.appendChild(noWhitelistMsg);
+            return;
+        }
+        
+        noWhitelistMsg.style.display = 'none';
+        
+        whitelist.forEach(player => {
+            const playerItem = document.createElement('div');
+            playerItem.className = 'list-group-item list-group-item-action list-group-item-dark d-flex justify-content-between align-items-center';
+            
+            playerItem.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <img src="https://crafatar.com/avatars/${player.uuid}?size=32&overlay" 
+                         class="rounded me-3" 
+                         alt="${escapeHtml(player.name)}"
+                         onerror="this.src='https://crafatar.com/avatars/steve?size=32&overlay'">
+                    <div>
+                        <strong>${escapeHtml(player.name)}</strong><br>
+                        <small class="text-body-secondary font-monospace">${escapeHtml(player.uuid)}</small>
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-danger remove-whitelist-btn" data-uuid="${player.uuid}" title="Remove from whitelist">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            
+            playerItem.querySelector('.remove-whitelist-btn').addEventListener('click', () => removeFromWhitelist(player.uuid, player.name));
+            whitelistContainer.appendChild(playerItem);
+        });
+    };
+    
+    const addToWhitelist = async () => {
+        const username = whitelistUsernameInput.value.trim();
+        if (!username) {
+            Swal.fire('Hold up!', 'Please enter a username', 'warning');
+            return;
+        }
+        
+        addWhitelistBtn.disabled = true;
+        addWhitelistBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Adding...';
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/whitelist`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to add player');
+            
+            Swal.fire('Success!', data.message, 'success');
+            whitelistUsernameInput.value = '';
+            fetchWhitelist();
+        } catch (error) {
+            Swal.fire('Error', error.message, 'error');
+        } finally {
+            addWhitelistBtn.disabled = false;
+            addWhitelistBtn.innerHTML = '<i class="fas fa-plus me-2"></i>Add to Whitelist';
+        }
+    };
+    
+    const removeFromWhitelist = async (uuid, playerName) => {
+        const result = await Swal.fire({
+            title: 'Remove from whitelist?',
+            text: `Remove ${playerName} from the whitelist?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, remove',
+            confirmButtonColor: '#d33'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/whitelist/${uuid}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to remove player');
+            
+            Swal.fire('Removed!', data.message, 'success');
+            fetchWhitelist();
+        } catch (error) {
+            Swal.fire('Error', error.message, 'error');
+        }
+    };
+    
+    const fetchOperators = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/operators`);
+            if (!response.ok) throw new Error('Failed to fetch operators');
+            const operators = await response.json();
+            renderOperators(operators);
+        } catch (error) {
+            console.error('Error fetching operators:', error);
+            operatorsContainer.innerHTML = '<div class="text-danger text-center p-3">Failed to load operators</div>';
+        }
+    };
+    
+    const renderOperators = (operators) => {
+        operatorsContainer.innerHTML = '';
+        
+        if (!operators || operators.length === 0) {
+            noOperatorsMsg.style.display = 'block';
+            noOperatorsMsg.textContent = 'No operators set yet';
+            operatorsContainer.appendChild(noOperatorsMsg);
+            return;
+        }
+        
+        noOperatorsMsg.style.display = 'none';
+        
+        operators.forEach(op => {
+            const opItem = document.createElement('div');
+            opItem.className = 'list-group-item list-group-item-action list-group-item-dark d-flex justify-content-between align-items-center';
+            
+            opItem.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <img src="https://crafatar.com/avatars/${op.uuid}?size=32&overlay" 
+                         class="rounded me-3" 
+                         alt="${escapeHtml(op.name)}"
+                         onerror="this.src='https://crafatar.com/avatars/steve?size=32&overlay'">
+                    <div>
+                        <strong>${escapeHtml(op.name)}</strong>
+                        <span class="badge bg-warning text-dark ms-2">Level ${op.level}</span><br>
+                        <small class="text-body-secondary font-monospace">${escapeHtml(op.uuid)}</small>
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-danger remove-op-btn" data-uuid="${op.uuid}" title="Remove operator">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            
+            opItem.querySelector('.remove-op-btn').addEventListener('click', () => removeOperator(op.uuid, op.name));
+            operatorsContainer.appendChild(opItem);
+        });
+    };
+    
+    const addOperator = async () => {
+        const username = opUsernameInput.value.trim();
+        const level = opLevelSelect.value;
+        
+        if (!username) {
+            Swal.fire('Hold up!', 'Please enter a username', 'warning');
+            return;
+        }
+        
+        addOpBtn.disabled = true;
+        addOpBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Adding...';
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/operators`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username, level: parseInt(level) })
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to add operator');
+            
+            Swal.fire('Success!', data.message, 'success');
+            opUsernameInput.value = '';
+            fetchOperators();
+        } catch (error) {
+            Swal.fire('Error', error.message, 'error');
+        } finally {
+            addOpBtn.disabled = false;
+            addOpBtn.innerHTML = '<i class="fas fa-crown me-2"></i>Add Op';
+        }
+    };
+    
+    const removeOperator = async (uuid, playerName) => {
+        const result = await Swal.fire({
+            title: 'Remove operator status?',
+            text: `Remove operator permissions from ${playerName}?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, remove',
+            confirmButtonColor: '#d33'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/operators/${uuid}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to remove operator');
+            
+            Swal.fire('Removed!', data.message, 'success');
+            fetchOperators();
+        } catch (error) {
+            Swal.fire('Error', error.message, 'error');
+        }
+    };
+    
+    // Event listeners for player management
+    if (addWhitelistBtn) {
+        addWhitelistBtn.addEventListener('click', addToWhitelist);
+        whitelistUsernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addToWhitelist();
+        });
+    }
+    
+    if (addOpBtn) {
+        addOpBtn.addEventListener('click', addOperator);
+        opUsernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addOperator();
+        });
+    }
+    
+    // Load player management when Settings tab is shown
+    if (settingsTab) {
+        settingsTab.addEventListener('shown.bs.tab', () => {
+            fetchWhitelist();
+            fetchOperators();
+        });
+    }
+    
+    // --- Player Analytics ---
+    
+    const analyticsTab = document.getElementById('analytics-tab');
+    const refreshAnalyticsBtn = document.getElementById('refresh-analytics-btn');
+    const onlinePlayersList = document.getElementById('online-players-list');
+    const playtimeTableBody = document.getElementById('playtime-table-body');
+    const peakHoursChart = document.getElementById('peak-hours-chart');
+    const recentSessionsContainer = document.getElementById('recent-sessions-container');
+    
+    const refreshAnalytics = async () => {
+        if (!refreshAnalyticsBtn) return;
+        
+        refreshAnalyticsBtn.disabled = true;
+        refreshAnalyticsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Refreshing...';
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/refresh`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) throw new Error('Failed to refresh analytics');
+            
+            Swal.fire({
+                title: 'Success!',
+                text: 'Analytics data refreshed',
+                icon: 'success',
+                timer: 1500,
+                showConfirmButton: false
+            });
+            
+            // Reload all analytics data
+            fetchAllAnalytics();
+        } catch (error) {
+            Swal.fire('Error', error.message, 'error');
+        } finally {
+            refreshAnalyticsBtn.disabled = false;
+            refreshAnalyticsBtn.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Refresh Data';
+        }
+    };
+    
+    const fetchOnlinePlayers = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/online`);
+            if (!response.ok) throw new Error('Failed to fetch online players');
+            const players = await response.json();
+            renderOnlinePlayers(players);
+        } catch (error) {
+            console.error('Error fetching online players:', error);
+        }
+    };
+    
+    const renderOnlinePlayers = (players) => {
+        if (!onlinePlayersList) return;
+        
+        onlinePlayersList.innerHTML = '';
+        
+        if (!players || players.length === 0) {
+            onlinePlayersList.innerHTML = '<span class="text-body-secondary">No players online</span>';
+            return;
+        }
+        
+        players.forEach(playerName => {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-success';
+            badge.innerHTML = `<i class="fas fa-circle me-1"></i>${escapeHtml(playerName)}`;
+            onlinePlayersList.appendChild(badge);
+        });
+    };
+    
+    const fetchPlaytime = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/playtime`);
+            if (!response.ok) throw new Error('Failed to fetch playtime data');
+            const playtime = await response.json();
+            renderPlaytime(playtime);
+        } catch (error) {
+            console.error('Error fetching playtime:', error);
+            playtimeTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Failed to load playtime data</td></tr>';
+        }
+    };
+    
+    const renderPlaytime = (playtime) => {
+        if (!playtimeTableBody) return;
+        
+        playtimeTableBody.innerHTML = '';
+        
+        if (!playtime || playtime.length === 0) {
+            playtimeTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-body-secondary">No playtime data available</td></tr>';
+            return;
+        }
+        
+        playtime.forEach(player => {
+            const row = document.createElement('tr');
+            const firstJoinDate = new Date(player.first_join * 1000).toLocaleDateString();
+            const lastJoinDate = new Date(player.last_join * 1000).toLocaleString();
+            const isNew = player.join_count === 1;
+            
+            row.innerHTML = `
+                <td>
+                    <strong>${escapeHtml(player.player)}</strong>
+                    ${isNew ? '<span class="badge bg-info ms-2">New!</span>' : ''}
+                </td>
+                <td>${player.total_playtime_hours}h</td>
+                <td>${player.join_count}</td>
+                <td>${firstJoinDate}</td>
+                <td>${lastJoinDate}</td>
+            `;
+            playtimeTableBody.appendChild(row);
+        });
+    };
+    
+    const fetchPeakHours = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/peak-hours`);
+            if (!response.ok) throw new Error('Failed to fetch peak hours');
+            const peakHours = await response.json();
+            renderPeakHours(peakHours);
+        } catch (error) {
+            console.error('Error fetching peak hours:', error);
+            peakHoursChart.innerHTML = '<div class="text-danger text-center">Failed to load peak hours data</div>';
+        }
+    };
+    
+    const renderPeakHours = (peakHours) => {
+        if (!peakHoursChart) return;
+        
+        peakHoursChart.innerHTML = '';
+        
+        // Find max value for scaling
+        const values = Object.values(peakHours);
+        const maxValue = Math.max(...values, 1);
+        
+        // Create hour blocks
+        const hoursContainer = document.createElement('div');
+        hoursContainer.className = 'd-flex flex-wrap gap-2 justify-content-center';
+        
+        for (let hour = 0; hour < 24; hour++) {
+            const count = peakHours[hour.toString()] || 0;
+            const percentage = maxValue > 0 ? (count / maxValue) * 100 : 0;
+            
+            const hourBlock = document.createElement('div');
+            hourBlock.className = 'text-center';
+            hourBlock.style.width = '60px';
+            
+            // Color intensity based on activity
+            let colorClass = 'bg-secondary';
+            if (percentage > 75) colorClass = 'bg-danger';
+            else if (percentage > 50) colorClass = 'bg-warning';
+            else if (percentage > 25) colorClass = 'bg-info';
+            else if (percentage > 0) colorClass = 'bg-primary';
+            
+            hourBlock.innerHTML = `
+                <div class="rounded p-2 ${colorClass} mb-1" style="height: ${Math.max(30, percentage)}px; opacity: ${0.3 + (percentage / 100) * 0.7};" title="${count} sessions at ${hour}:00"></div>
+                <small class="text-body-secondary">${hour}:00</small>
+            `;
+            
+            hoursContainer.appendChild(hourBlock);
+        }
+        
+        peakHoursChart.appendChild(hoursContainer);
+    };
+    
+    const fetchRecentSessions = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/analytics/sessions`);
+            if (!response.ok) throw new Error('Failed to fetch sessions');
+            const sessions = await response.json();
+            renderRecentSessions(sessions);
+        } catch (error) {
+            console.error('Error fetching sessions:', error);
+            recentSessionsContainer.innerHTML = '<div class="text-danger text-center p-3">Failed to load sessions</div>';
+        }
+    };
+    
+    const renderRecentSessions = (sessions) => {
+        if (!recentSessionsContainer) return;
+        
+        recentSessionsContainer.innerHTML = '';
+        
+        if (!sessions || sessions.length === 0) {
+            recentSessionsContainer.innerHTML = '<div class="text-body-secondary text-center p-3">No session data available</div>';
+            return;
+        }
+        
+        sessions.slice(0, 20).forEach(session => {
+            const sessionItem = document.createElement('div');
+            sessionItem.className = 'list-group-item list-group-item-dark d-flex justify-content-between align-items-center';
+            
+            const joinDate = new Date(session.join_time * 1000).toLocaleString();
+            const leaveDate = session.leave_time ? new Date(session.leave_time * 1000).toLocaleString() : 'Still online';
+            
+            sessionItem.innerHTML = `
+                <div>
+                    <strong>${escapeHtml(session.player)}</strong><br>
+                    <small class="text-body-secondary">
+                        <i class="fas fa-sign-in-alt me-1"></i>${joinDate}
+                        ${session.leave_time ? `<i class="fas fa-sign-out-alt ms-2 me-1"></i>${leaveDate}` : ''}
+                    </small>
+                </div>
+                <span class="badge bg-primary">${session.duration_minutes}m</span>
+            `;
+            
+            recentSessionsContainer.appendChild(sessionItem);
+        });
+    };
+    
+    const fetchAllAnalytics = () => {
+        fetchOnlinePlayers();
+        fetchPlaytime();
+        fetchPeakHours();
+        fetchRecentSessions();
+    };
+    
+    if (refreshAnalyticsBtn) {
+        refreshAnalyticsBtn.addEventListener('click', refreshAnalytics);
+    }
+    
+    if (analyticsTab) {
+        analyticsTab.addEventListener('shown.bs.tab', fetchAllAnalytics);
+    }
+    
+    // Poll for online players when on analytics tab
+    let analyticsPolling = null;
+    if (analyticsTab) {
+        analyticsTab.addEventListener('shown.bs.tab', () => {
+            fetchAllAnalytics();
+            analyticsPolling = setInterval(fetchOnlinePlayers, 5000); // Update every 5 seconds
+        });
+        
+        // Stop polling when leaving analytics tab
+        analyticsTab.addEventListener('hidden.bs.tab', () => {
+            if (analyticsPolling) {
+                clearInterval(analyticsPolling);
+                analyticsPolling = null;
+            }
+        });
+    }
+    
+    // ===========================
+    // Plugin/Mod Manager
+    // ===========================
+    
+    const pluginSearchInput = document.getElementById('plugin-search-input');
+    const pluginSearchBtn = document.getElementById('plugin-search-btn');
+    const pluginSearchResults = document.getElementById('plugin-search-results');
+    const pluginSearchResultsContainer = document.getElementById('plugin-search-results-container');
+    const installedPluginsContainer = document.getElementById('installed-plugins-container');
+    const refreshPluginsBtn = document.getElementById('refresh-plugins-btn');
+    const pluginsTab = document.getElementById('plugins-tab');
+    const pluginsTabNav = document.getElementById('plugins-tab-nav');
+    const pluginManagerTitle = document.getElementById('plugin-manager-title');
+    const installedPluginType = document.getElementById('installed-plugin-type');
+    
+    let currentServerType = 'unknown';
+    let folderType = 'plugins';
+    
+    // Check if server supports plugins/mods
+    const checkPluginSupport = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/supports-plugins`);
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            if (data.supports) {
+                pluginsTabNav.style.display = 'block';
+                currentServerType = data.server_type;
+                folderType = data.folder_type;
+                
+                // Update UI labels based on folder type
+                if (folderType === 'mods') {
+                    pluginManagerTitle.textContent = 'Mod Manager';
+                    installedPluginType.textContent = 'Mods';
+                    pluginSearchInput.placeholder = 'Search for mods...';
+                } else {
+                    pluginManagerTitle.textContent = 'Plugin Manager';
+                    installedPluginType.textContent = 'Plugins';
+                    pluginSearchInput.placeholder = 'Search for plugins...';
+                }
+            } else {
+                pluginsTabNav.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error checking plugin support:', error);
+            pluginsTabNav.style.display = 'none';
+        }
+    };
+    
+    // Fetch installed plugins
+    const fetchInstalledPlugins = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins`);
+            if (!response.ok) throw new Error('Failed to fetch plugins');
+            
+            const plugins = await response.json();
+            renderInstalledPlugins(plugins);
+        } catch (error) {
+            console.error('Error fetching plugins:', error);
+            installedPluginsContainer.innerHTML = '<div class="text-danger text-center p-3">Failed to load plugins</div>';
+        }
+    };
+    
+    // Render installed plugins
+    const renderInstalledPlugins = (plugins) => {
+        if (!installedPluginsContainer) return;
+        
+        installedPluginsContainer.innerHTML = '';
+        
+        if (!plugins || plugins.length === 0) {
+            installedPluginsContainer.innerHTML = `<div class="text-body-secondary text-center p-3">No ${folderType} installed</div>`;
+            return;
+        }
+        
+        plugins.forEach(plugin => {
+            const pluginItem = document.createElement('div');
+            pluginItem.className = 'list-group-item list-group-item-dark d-flex justify-content-between align-items-center';
+            
+            pluginItem.innerHTML = `
+                <div>
+                    <i class="fas fa-puzzle-piece me-2"></i>
+                    <strong>${escapeHtml(plugin.name)}</strong>
+                    <br>
+                    <small class="text-body-secondary">${plugin.size_mb} MB</small>
+                </div>
+                <button class="btn btn-sm btn-outline-danger delete-plugin-btn" data-filename="${escapeHtml(plugin.filename)}">
+                    <i class="fas fa-trash-alt"></i> Remove
+                </button>
+            `;
+            
+            installedPluginsContainer.appendChild(pluginItem);
+        });
+        
+        // Add event listeners to delete buttons
+        document.querySelectorAll('.delete-plugin-btn').forEach(btn => {
+            btn.addEventListener('click', () => deletePlugin(btn.dataset.filename));
+        });
+    };
+    
+    // Search for plugins
+    const searchPlugins = async () => {
+        const query = pluginSearchInput.value.trim();
+        if (!query) {
+            Swal.fire('Error', 'Please enter a search term', 'error');
+            return;
+        }
+        
+        pluginSearchResultsContainer.innerHTML = '<div class="text-center p-3"><div class="spinner-border text-primary" role="status"></div></div>';
+        pluginSearchResults.style.display = 'block';
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins/search?query=${encodeURIComponent(query)}`);
+            if (!response.ok) throw new Error('Search failed');
+            
+            const results = await response.json();
+            renderSearchResults(results);
+        } catch (error) {
+            console.error('Error searching plugins:', error);
+            pluginSearchResultsContainer.innerHTML = '<div class="text-danger text-center p-3">Search failed. Please try again.</div>';
+        }
+    };
+    
+    // Render search results
+    const renderSearchResults = (results) => {
+        if (!pluginSearchResultsContainer) return;
+        
+        pluginSearchResultsContainer.innerHTML = '';
+        
+        if (!results || results.length === 0) {
+            pluginSearchResultsContainer.innerHTML = '<div class="text-body-secondary text-center p-3">No results found</div>';
+            return;
+        }
+        
+        results.forEach(plugin => {
+            const resultItem = document.createElement('div');
+            resultItem.className = 'list-group-item list-group-item-dark';
+            
+            const iconHtml = plugin.icon_url 
+                ? `<img src="${escapeHtml(plugin.icon_url)}" alt="${escapeHtml(plugin.name)}" style="width: 48px; height: 48px; object-fit: cover;" class="rounded me-3">`
+                : '<i class="fas fa-puzzle-piece fa-2x me-3"></i>';
+            
+            const categoriesBadges = plugin.categories
+                .slice(0, 3)
+                .map(cat => `<span class="badge bg-secondary me-1">${escapeHtml(cat)}</span>`)
+                .join('');
+            
+            resultItem.innerHTML = `
+                <div class="d-flex align-items-start">
+                    ${iconHtml}
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h6 class="mb-1">${escapeHtml(plugin.name)}</h6>
+                                <small class="text-body-secondary">by ${escapeHtml(plugin.author)}</small>
+                            </div>
+                            <button class="btn btn-sm btn-success install-plugin-btn" data-project-id="${escapeHtml(plugin.id)}" data-name="${escapeHtml(plugin.name)}">
+                                <i class="fas fa-download me-1"></i> Install
+                            </button>
+                        </div>
+                        <p class="mb-2 small">${escapeHtml(plugin.description)}</p>
+                        <div class="d-flex gap-2 align-items-center">
+                            ${categoriesBadges}
+                            <small class="text-body-secondary ms-auto">
+                                <i class="fas fa-download me-1"></i>${formatNumber(plugin.downloads)} downloads
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            pluginSearchResultsContainer.appendChild(resultItem);
+        });
+        
+        // Add event listeners to install buttons
+        document.querySelectorAll('.install-plugin-btn').forEach(btn => {
+            btn.addEventListener('click', () => installPlugin(btn.dataset.projectId, btn.dataset.name));
+        });
+    };
+    
+    // Install a plugin
+    const installPlugin = async (projectId, pluginName) => {
+        const result = await Swal.fire({
+            title: 'Install Plugin?',
+            text: `Do you want to install ${pluginName}?`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Install',
+            cancelButtonText: 'Cancel'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        Swal.fire({
+            title: 'Installing...',
+            text: `Installing ${pluginName}...`,
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins/install`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Installation failed');
+            }
+            
+            await Swal.fire('Success!', data.message, 'success');
+            fetchInstalledPlugins();
+        } catch (error) {
+            console.error('Error installing plugin:', error);
+            Swal.fire('Error', error.message || 'Failed to install plugin', 'error');
+        }
+    };
+    
+    // Delete a plugin
+    const deletePlugin = async (filename) => {
+        const result = await Swal.fire({
+            title: 'Remove Plugin?',
+            text: `Are you sure you want to remove ${filename}?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Remove',
+            cancelButtonText: 'Cancel',
+            confirmButtonColor: '#dc3545'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/plugins/${encodeURIComponent(filename)}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Deletion failed');
+            }
+            
+            await Swal.fire('Removed!', data.message, 'success');
+            fetchInstalledPlugins();
+        } catch (error) {
+            console.error('Error deleting plugin:', error);
+            Swal.fire('Error', error.message || 'Failed to remove plugin', 'error');
+        }
+    };
+    
+    // Format number with commas
+    const formatNumber = (num) => {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    };
+    
+    // Event listeners
+    if (pluginSearchBtn) {
+        pluginSearchBtn.addEventListener('click', searchPlugins);
+    }
+    
+    if (pluginSearchInput) {
+        pluginSearchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchPlugins();
+            }
+        });
+    }
+    
+    if (refreshPluginsBtn) {
+        refreshPluginsBtn.addEventListener('click', fetchInstalledPlugins);
+    }
+    
+    if (pluginsTab) {
+        pluginsTab.addEventListener('shown.bs.tab', fetchInstalledPlugins);
+    }
+    
+    // Check plugin support on page load
+    checkPluginSupport();
+    
+    // ===========================
+    // World Management
+    // ===========================
+    
+    const worldsTab = document.getElementById('worlds-tab');
+    const refreshWorldsBtn = document.getElementById('refresh-worlds-btn');
+    const worldsListContainer = document.getElementById('worlds-list-container');
+    const noWorldsMsg = document.getElementById('no-worlds-msg');
+    const worldUploadForm = document.getElementById('world-upload-form');
+    const worldNameInput = document.getElementById('world-name-input');
+    const worldFileInput = document.getElementById('world-file-input');
+    const uploadWorldBtn = document.getElementById('upload-world-btn');
+    
+    // Fetch worlds list
+    const fetchWorlds = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/worlds`);
+            if (!response.ok) throw new Error('Failed to fetch worlds');
+            
+            const worlds = await response.json();
+            renderWorlds(worlds);
+        } catch (error) {
+            console.error('Error fetching worlds:', error);
+            if (worldsListContainer) {
+                worldsListContainer.innerHTML = '<div class="text-danger text-center p-3">Failed to load worlds</div>';
+            }
+        }
+    };
+    
+    // Render worlds list
+    const renderWorlds = (worlds) => {
+        if (!worldsListContainer) return;
+        
+        worldsListContainer.innerHTML = '';
+        
+        if (!worlds || worlds.length === 0) {
+            worldsListContainer.innerHTML = '<div class="text-body-secondary text-center p-3">No worlds found</div>';
+            return;
+        }
+        
+        worlds.forEach(world => {
+            const worldCard = document.createElement('div');
+            worldCard.className = 'card bg-dark mb-3';
+            
+            const dimensionsInfo = [];
+            if (world.has_nether) dimensionsInfo.push('<span class="badge bg-danger me-1"><i class="fas fa-fire me-1"></i>Nether</span>');
+            if (world.has_end) dimensionsInfo.push('<span class="badge bg-purple me-1"><i class="fas fa-dragon me-1"></i>End</span>');
+            
+            worldCard.innerHTML = `
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h6 class="mb-1"><i class="fas fa-globe me-2"></i>${escapeHtml(world.name)}</h6>
+                            <p class="text-body-secondary small mb-2">
+                                <i class="fas fa-hdd me-1"></i>Size: ${world.size_mb} MB
+                            </p>
+                            <div>
+                                ${dimensionsInfo.join('')}
+                            </div>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-primary download-world-btn" data-world="${escapeHtml(world.name)}" title="Download World">
+                                <i class="fas fa-download"></i>
+                            </button>
+                            <button class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                                <span class="visually-hidden">More actions</span>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+                                ${world.has_nether ? `<li><a class="dropdown-item text-warning reset-dimension-btn" href="#" data-world="${escapeHtml(world.name)}" data-dimension="nether"><i class="fas fa-fire me-2"></i>Reset Nether</a></li>` : ''}
+                                ${world.has_end ? `<li><a class="dropdown-item text-warning reset-dimension-btn" href="#" data-world="${escapeHtml(world.name)}" data-dimension="end"><i class="fas fa-dragon me-2"></i>Reset End</a></li>` : ''}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            worldsListContainer.appendChild(worldCard);
+        });
+        
+        // Add event listeners
+        document.querySelectorAll('.download-world-btn').forEach(btn => {
+            btn.addEventListener('click', () => downloadWorld(btn.dataset.world));
+        });
+        
+        document.querySelectorAll('.reset-dimension-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                resetDimension(btn.dataset.world, btn.dataset.dimension);
+            });
+        });
+    };
+    
+    // Download world
+    const downloadWorld = async (worldName) => {
+        try {
+            Swal.fire({
+                title: 'Preparing Download...',
+                text: `Creating ZIP file for ${worldName}. This may take a while for large worlds.`,
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+            
+            // Trigger download
+            const downloadUrl = `${API_URL}/api/servers/${serverId}/worlds/${encodeURIComponent(worldName)}/download`;
+            window.location.href = downloadUrl;
+            
+            // Close loading after a delay
+            setTimeout(() => {
+                Swal.close();
+            }, 2000);
+            
+        } catch (error) {
+            console.error('Error downloading world:', error);
+            Swal.fire('Error', 'Failed to download world', 'error');
+        }
+    };
+    
+    // Upload world
+    const uploadWorld = async (e) => {
+        e.preventDefault();
+        
+        const worldName = worldNameInput.value.trim();
+        const file = worldFileInput.files[0];
+        
+        if (!worldName) {
+            Swal.fire('Error', 'Please enter a world name', 'error');
+            return;
+        }
+        
+        if (!file) {
+            Swal.fire('Error', 'Please select a ZIP file', 'error');
+            return;
+        }
+        
+        const result = await Swal.fire({
+            title: 'Upload World?',
+            html: `Upload <strong>${escapeHtml(file.name)}</strong> as world folder <strong>${escapeHtml(worldName)}</strong>?<br><br><span class="text-warning">⚠️ The server must be stopped. Existing world will be backed up.</span>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Upload',
+            cancelButtonText: 'Cancel'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        Swal.fire({
+            title: 'Uploading...',
+            text: 'Uploading and extracting world. This may take a while...',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('world_name', worldName);
+            
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/worlds/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Upload failed');
+            }
+            
+            await Swal.fire('Success!', data.message, 'success');
+            worldFileInput.value = '';
+            fetchWorlds();
+            
+        } catch (error) {
+            console.error('Error uploading world:', error);
+            Swal.fire('Error', error.message || 'Failed to upload world', 'error');
+        }
+    };
+    
+    // Reset dimension
+    const resetDimension = async (worldName, dimension) => {
+        const result = await Swal.fire({
+            title: `Reset ${dimension.charAt(0).toUpperCase() + dimension.slice(1)}?`,
+            html: `This will delete the ${dimension} dimension in <strong>${escapeHtml(worldName)}</strong>.<br><br><span class="text-warning">⚠️ The server must be stopped. A backup will be created.</span>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Reset',
+            cancelButtonText: 'Cancel',
+            confirmButtonColor: '#dc3545'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        Swal.fire({
+            title: 'Resetting...',
+            text: `Resetting ${dimension} dimension...`,
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        try {
+            const response = await fetch(`${API_URL}/api/servers/${serverId}/worlds/${encodeURIComponent(worldName)}/dimension/${dimension}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Reset failed');
+            }
+            
+            await Swal.fire('Success!', data.message, 'success');
+            fetchWorlds();
+            
+        } catch (error) {
+            console.error('Error resetting dimension:', error);
+            Swal.fire('Error', error.message || 'Failed to reset dimension', 'error');
+        }
+    };
+    
+    // Event listeners
+    if (refreshWorldsBtn) {
+        refreshWorldsBtn.addEventListener('click', fetchWorlds);
+    }
+    
+    if (worldUploadForm) {
+        worldUploadForm.addEventListener('submit', uploadWorld);
+    }
+    
+    if (worldsTab) {
+        worldsTab.addEventListener('shown.bs.tab', fetchWorlds);
+    }
+    
+    // ===========================
+    // Save Server as Template
+    // ===========================
+    
+    const saveAsTemplateBtn = document.getElementById('save-as-template-btn');
+    const templateNameInput = document.getElementById('template-name-input');
+    const templateDescInput = document.getElementById('template-desc-input');
+    
+    const saveAsTemplate = async () => {
+        const templateName = templateNameInput.value.trim();
+        
+        if (!templateName) {
+            Swal.fire('Error', 'Please enter a template name', 'error');
+            return;
+        }
+        
+        const description = templateDescInput.value.trim();
+        
+        const result = await Swal.fire({
+            title: 'Save as Template?',
+            html: `Save current server configuration as template <strong>"${escapeHtml(templateName)}"</strong>?<br><br><small class="text-body-secondary">This will save server properties, start/install scripts, and server type/version.</small>`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Save',
+            cancelButtonText: 'Cancel'
+        });
+        
+        if (!result.isConfirmed) return;
+        
+        Swal.fire({
+            title: 'Saving...',
+            text: 'Creating template...',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+        
+        try {
+            const response = await fetch(`${API_URL}/api/templates`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    server_name: serverId,
+                    template_name: templateName,
+                    description: description
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to save template');
+            }
+            
+            await Swal.fire('Success!', data.message, 'success');
+            templateNameInput.value = '';
+            templateDescInput.value = '';
+            
+        } catch (error) {
+            console.error('Error saving template:', error);
+            Swal.fire('Error', error.message || 'Failed to save template', 'error');
+        }
+    };
+    
+    if (saveAsTemplateBtn) {
+        saveAsTemplateBtn.addEventListener('click', saveAsTemplate);
+    }
+})();

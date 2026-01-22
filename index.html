@@ -47,15 +47,36 @@
 
             <!-- Server Creation Column -->
             <div class="col-lg-4">
-                <div class="card bg-dark shadow">
+                <div class="card bg-dark shadow mb-4">
                     <div class="card-body p-4 text-center">
                         <h2 class="card-title text-white mb-4">Create New Server</h2>
                         <p class="text-body-secondary">Ready to start a new adventure?</p>
-                            <div class="d-grid">
+                        <div class="d-grid gap-2">
                             <button id="createServerBtn" class="btn btn-success btn-lg">
-                                    <i class="fas fa-plus-circle me-2"></i>Create Server
-                                </button>
+                                <i class="fas fa-plus-circle me-2"></i>Create Server
+                            </button>
+                            <button id="createFromTemplateBtn" class="btn btn-outline-primary btn-lg">
+                                <i class="fas fa-file-import me-2"></i>From Template
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Server Templates Card -->
+                <div class="card bg-dark shadow">
+                    <div class="card-body p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h3 class="card-title text-white h5 mb-0">Server Templates</h3>
+                            <button id="importTemplateBtn" class="btn btn-sm btn-outline-secondary" title="Import Template">
+                                <i class="fas fa-file-upload"></i>
+                            </button>
+                        </div>
+                        <p class="text-body-secondary small mb-3">Save and reuse server configurations</p>
+                        <div id="templatesList" class="list-group list-group-dark">
+                            <div class="text-body-secondary text-center p-3" id="no-templates-msg">
+                                No templates yet
                             </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -119,8 +140,60 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="selectDirectoryBtn">Select This Directory</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create From Template Modal -->
+    <div class="modal fade" id="createFromTemplateModal" tabindex="-1" aria-labelledby="createFromTemplateModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createFromTemplateModalLabel">Create Server From Template</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="template-select" class="form-label">Select Template</label>
+                        <select id="template-select" class="form-select">
+                            <option value="">Loading templates...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-server-name" class="form-label">Server Name</label>
+                        <input type="text" class="form-control" id="new-server-name" placeholder="my_server" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-server-port" class="form-label">Port</label>
+                        <input type="number" class="form-control" id="new-server-port" value="25565" min="1024" max="65535" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirm-create-from-template">Create Server</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Template Modal -->
+    <div class="modal fade" id="importTemplateModal" tabindex="-1" aria-labelledby="importTemplateModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="importTemplateModalLabel">Import Template</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-body-secondary small mb-3">Select a JSON template file to import</p>
+                    <input type="file" class="form-control" id="template-file-input" accept=".json">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirm-import-template">Import</button>
                 </div>
             </div>
         </div>

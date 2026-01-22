@@ -21,7 +21,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 # --- Configuration ---
-app = Flask(__name__)
+app = Flask(__name__, static_folder='..', static_url_path='')
 CORS(app)
 
 # --- Configuration Loading ---
@@ -62,6 +62,7 @@ def save_config(config_data):
 config = load_config()
 SERVERS_DIR = config['servers_dir']
 CONFIGS_DIR = config['configs_dir']
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_templates')
 
 # --- Global State ---
 # This dictionary will hold the running server subprocesses
@@ -77,15 +78,6 @@ SUPPORTED_SERVER_TYPES = [
     "quilt", "forge", "vanilla"
 ]
 
-
-# --- Minecraft Version Info ---
-# In a real app, this might come from an API or a config file
-MINECRAFT_VERSIONS = {
-    "1.20.4": "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar",
-    "1.19.4": "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397e3cc5316b4a1f/server.jar",
-    "1.18.2": "https://piston-data.mojang.com/v1/objects/c8f83c5655308435b3dcf03c06d9fe8740a77469/server.jar",
-    "1.16.5": "https://piston-data.mojang.com/v1/objects/1b557e7b033b583cd9f66746b7a9ab1ec1673ced/server.jar"
-}
 
 
 # --- Helper Functions ---
@@ -239,10 +231,10 @@ def update_server_port(server_name):
         port_updated = False
         # Create file with default motd if it doesn't exist
         if not os.path.exists(props_file):
-             with open(props_file, 'w') as f:
-                 f.write("motd=Powered by MineKeks Dashboard\n")
-                 f.write(f"server-port={new_port}\n")
-             return jsonify({"message": f"server.properties created and port set to {new_port}."})
+            with open(props_file, 'w') as f:
+                f.write("motd=Powered by MineKeks Dashboard\n")
+                f.write(f"server-port={new_port}\n")
+            return jsonify({"message": f"server.properties created and port set to {new_port}."})
 
         with open(props_file, 'r') as f:
             lines = f.readlines()
@@ -766,7 +758,7 @@ def browse_files():
                 item_path = os.path.join(current_path, item)
                 # Filter out hidden files/folders and system/recycle bin folders on Windows
                 if not item.startswith('.') and not item.lower().startswith('$recycle.bin'):
-                     if os.path.isdir(item_path):
+                    if os.path.isdir(item_path):
                         dirs.append(item)
             except OSError:
                 continue # Skip files that can't be accessed
@@ -900,7 +892,7 @@ def delete_server(server_name):
         if stop_status != 200:
             # If stopping fails for a reason other than 'not running', report error
             if 'not running' not in stop_result.get('error', '').lower():
-                 return jsonify({"error": f"Could not stop server before deletion: {stop_result.get('error')}"}), 500
+                return jsonify({"error": f"Could not stop server before deletion: {stop_result.get('error')}"}), 500
     
     try:
         shutil.rmtree(server_path)
@@ -1013,14 +1005,14 @@ def stop_server(server_name):
         # Give it a moment to disappear after quitting
         time.sleep(2)
         if is_server_running(server_name):
-             return {'error': 'Failed to stop or force-quit the server screen.'}, 500
+            return {'error': 'Failed to stop or force-quit the server screen.'}, 500
 
         return {'message': 'Server was unresponsive and has been force-quit.'}, 200
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         error_message = f"Failed to send stop command via screen: {e}"
         if hasattr(e, 'stderr') and "No screen session found" in str(e.stderr):
-             return {'error': 'Server is not running'}, 409
+            return {'error': 'Server is not running'}, 409
         print(f"ERROR [{server_name}]: {error_message} - Stderr: {e.stderr if hasattr(e, 'stderr') else 'N/A'}")
         return {'error': error_message}, 500
     except Exception as e:
@@ -1271,11 +1263,11 @@ def get_loader_versions(loader):
         elif loader in ['forge', 'neoforge']:
             # Forge/NeoForge versioning is more complex, often tied to Minecraft version.
             # For simplicity, we'll return Minecraft versions, and fetch the latest build for it.
-             url = "https://meta.fabricmc.net/v2/versions/game"
-             response = requests.get(url)
-             response.raise_for_status()
-             versions = [v['version'] for v in response.json() if v['stable']]
-             return jsonify(versions)
+            url = "https://meta.fabricmc.net/v2/versions/game"
+            response = requests.get(url)
+            response.raise_for_status()
+            versions = [v['version'] for v in response.json() if v['stable']]
+            return jsonify(versions)
         else:
             return jsonify({'error': 'Unsupported loader'}), 400
     except requests.RequestException as e:
@@ -1820,8 +1812,8 @@ def restart_server_logic(server_name):
     stop_result, stop_status = stop_server(server_name)
     # Check if stop was successful or if the server was already stopped.
     if stop_status not in [200, 409]:
-         print(f"ERROR [{server_name}]: Could not stop server before restart: {stop_result.get('error')}")
-         return {'error': f"Could not stop server before restart: {stop_result.get('error')}"}, 500
+        print(f"ERROR [{server_name}]: Could not stop server before restart: {stop_result.get('error')}")
+        return {'error': f"Could not stop server before restart: {stop_result.get('error')}"}, 500
     
     # Wait a moment for resources to free up before starting again.
     time.sleep(2) 
@@ -1833,8 +1825,1334 @@ def restart_server_logic(server_name):
 
     return {'message': f'Server {server_name} is restarting.'}, 200
 
+# --- Player Management (Whitelist & Operators) ---
+
+def get_player_whitelist_path(server_name):
+    """Returns the path to whitelist.json for a server."""
+    return os.path.join(SERVERS_DIR, server_name, 'whitelist.json')
+
+def get_player_ops_path(server_name):
+    """Returns the path to ops.json for a server."""
+    return os.path.join(SERVERS_DIR, server_name, 'ops.json')
+
+def load_whitelist(server_name):
+    """Loads the whitelist from whitelist.json."""
+    path = get_player_whitelist_path(server_name)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return []
+
+def save_whitelist(server_name, whitelist):
+    """Saves the whitelist to whitelist.json."""
+    path = get_player_whitelist_path(server_name)
+    with open(path, 'w') as f:
+        json.dump(whitelist, f, indent=2)
+
+def load_ops(server_name):
+    """Loads operators from ops.json."""
+    path = get_player_ops_path(server_name)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return []
+
+def save_ops(server_name, ops):
+    """Saves operators to ops.json."""
+    path = get_player_ops_path(server_name)
+    with open(path, 'w') as f:
+        json.dump(ops, f, indent=2)
+
+def get_uuid_from_username(username):
+    """Fetches player UUID from Mojang API."""
+    try:
+        response = requests.get(f'https://api.mojang.com/users/profiles/minecraft/{username}', timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            # Format UUID with dashes
+            uuid_raw = data['id']
+            uuid_formatted = f"{uuid_raw[:8]}-{uuid_raw[8:12]}-{uuid_raw[12:16]}-{uuid_raw[16:20]}-{uuid_raw[20:]}"
+            return {'uuid': uuid_formatted, 'name': data['name']}
+        elif response.status_code == 404:
+            return None
+        else:
+            return None
+    except Exception as e:
+        print(f"Error fetching UUID for {username}: {e}")
+        return None
+
+@app.route('/api/servers/<server_name>/whitelist', methods=['GET'])
+def get_whitelist(server_name):
+    """Get the whitelist for a server."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    whitelist = load_whitelist(server_name)
+    return jsonify(whitelist)
+
+@app.route('/api/servers/<server_name>/whitelist', methods=['POST'])
+def add_to_whitelist(server_name):
+    """Add a player to the whitelist."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    data = request.get_json()
+    username = data.get('username')
+    
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+    
+    # Get UUID from Mojang API
+    player_data = get_uuid_from_username(username)
+    if not player_data:
+        return jsonify({"error": f"Player '{username}' not found"}), 404
+    
+    whitelist = load_whitelist(server_name)
+    
+    # Check if player is already whitelisted
+    if any(p['uuid'] == player_data['uuid'] for p in whitelist):
+        return jsonify({"error": "Player is already whitelisted"}), 409
+    
+    # Add player to whitelist
+    whitelist.append({
+        'uuid': player_data['uuid'],
+        'name': player_data['name']
+    })
+    save_whitelist(server_name, whitelist)
+    
+    return jsonify({"message": f"Player '{player_data['name']}' added to whitelist", "player": player_data}), 201
+
+@app.route('/api/servers/<server_name>/whitelist/<player_uuid>', methods=['DELETE'])
+def remove_from_whitelist(server_name, player_uuid):
+    """Remove a player from the whitelist."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    whitelist = load_whitelist(server_name)
+    initial_length = len(whitelist)
+    whitelist = [p for p in whitelist if p['uuid'] != player_uuid]
+    
+    if len(whitelist) == initial_length:
+        return jsonify({"error": "Player not found in whitelist"}), 404
+    
+    save_whitelist(server_name, whitelist)
+    return jsonify({"message": "Player removed from whitelist"}), 200
+
+@app.route('/api/servers/<server_name>/operators', methods=['GET'])
+def get_operators(server_name):
+    """Get the operators list for a server."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    ops = load_ops(server_name)
+    return jsonify(ops)
+
+@app.route('/api/servers/<server_name>/operators', methods=['POST'])
+def add_operator(server_name):
+    """Add a player as operator."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    data = request.get_json()
+    username = data.get('username')
+    level = int(data.get('level', 4))  # Default to level 4 (full permissions)
+    
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+    
+    if level not in [1, 2, 3, 4]:
+        return jsonify({"error": "Permission level must be between 1 and 4"}), 400
+    
+    # Get UUID from Mojang API
+    player_data = get_uuid_from_username(username)
+    if not player_data:
+        return jsonify({"error": f"Player '{username}' not found"}), 404
+    
+    ops = load_ops(server_name)
+    
+    # Check if player is already an operator
+    existing_op = next((op for op in ops if op['uuid'] == player_data['uuid']), None)
+    if existing_op:
+        # Update permission level
+        existing_op['level'] = level
+        save_ops(server_name, ops)
+        return jsonify({"message": f"Updated operator '{player_data['name']}' to level {level}", "operator": existing_op}), 200
+    
+    # Add player as operator
+    new_op = {
+        'uuid': player_data['uuid'],
+        'name': player_data['name'],
+        'level': level,
+        'bypassesPlayerLimit': False
+    }
+    ops.append(new_op)
+    save_ops(server_name, ops)
+    
+    return jsonify({"message": f"Player '{player_data['name']}' added as operator (level {level})", "operator": new_op}), 201
+
+@app.route('/api/servers/<server_name>/operators/<player_uuid>', methods=['DELETE'])
+def remove_operator(server_name, player_uuid):
+    """Remove operator status from a player."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    ops = load_ops(server_name)
+    initial_length = len(ops)
+    ops = [op for op in ops if op['uuid'] != player_uuid]
+    
+    if len(ops) == initial_length:
+        return jsonify({"error": "Player not found in operators list"}), 404
+    
+    save_ops(server_name, ops)
+    return jsonify({"message": "Operator status removed"}), 200
+
+# --- Player Session Analytics ---
+
+ANALYTICS_FILE = 'player_analytics.json'
+
+def get_analytics_path(server_name):
+    """Returns the path to player analytics file."""
+    server_config_dir = get_server_config_dir(server_name)
+    return os.path.join(server_config_dir, ANALYTICS_FILE)
+
+def load_analytics(server_name):
+    """Loads player analytics data."""
+    path = get_analytics_path(server_name)
+    if not os.path.exists(path):
+        return {'players': {}, 'sessions': []}
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {'players': {}, 'sessions': []}
+
+def save_analytics(server_name, analytics_data):
+    """Saves player analytics data."""
+    path = get_analytics_path(server_name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(analytics_data, f, indent=2)
+
+def parse_log_for_sessions(server_name):
+    """Parse server logs to extract player join/leave events."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    log_file = os.path.join(server_path, 'logs', 'latest.log')
+    
+    if not os.path.exists(log_file):
+        return []
+    
+    analytics = load_analytics(server_name)
+    players_data = analytics.get('players', {})
+    sessions = analytics.get('sessions', [])
+    active_sessions = {}
+    
+    # Regular expressions for join/leave events
+    join_pattern = re.compile(r'\[.*?\]: (.*?) joined the game')
+    leave_pattern = re.compile(r'\[.*?\]: (.*?) left the game')
+    timestamp_pattern = re.compile(r'\[([\d:]+)\]')
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                # Extract timestamp
+                time_match = timestamp_pattern.search(line)
+                if not time_match:
+                    continue
+                
+                timestamp = time_match.group(1)
+                current_time = time.time()
+                
+                # Check for join event
+                join_match = join_pattern.search(line)
+                if join_match:
+                    player_name = join_match.group(1)
+                    
+                    # Initialize player data if not exists
+                    if player_name not in players_data:
+                        players_data[player_name] = {
+                            'first_join': current_time,
+                            'last_join': current_time,
+                            'total_playtime': 0,
+                            'join_count': 0
+                        }
+                    
+                    players_data[player_name]['last_join'] = current_time
+                    players_data[player_name]['join_count'] += 1
+                    
+                    # Start a new session
+                    active_sessions[player_name] = {
+                        'player': player_name,
+                        'join_time': current_time,
+                        'timestamp': timestamp
+                    }
+                
+                # Check for leave event
+                leave_match = leave_pattern.search(line)
+                if leave_match:
+                    player_name = leave_match.group(1)
+                    
+                    if player_name in active_sessions:
+                        session = active_sessions[player_name]
+                        leave_time = current_time
+                        duration = leave_time - session['join_time']
+                        
+                        # Update player total playtime
+                        if player_name in players_data:
+                            players_data[player_name]['total_playtime'] += duration
+                        
+                        # Record session
+                        sessions.append({
+                            'player': player_name,
+                            'join_time': session['join_time'],
+                            'leave_time': leave_time,
+                            'duration': duration
+                        })
+                        
+                        del active_sessions[player_name]
+        
+        # Save updated analytics
+        analytics['players'] = players_data
+        analytics['sessions'] = sessions
+        save_analytics(server_name, analytics)
+        
+        return analytics
+        
+    except Exception as e:
+        print(f"Error parsing logs for analytics: {e}")
+        return analytics
+
+@app.route('/api/servers/<server_name>/analytics/refresh', methods=['POST'])
+def refresh_analytics(server_name):
+    """Parse logs and update analytics data."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    try:
+        analytics = parse_log_for_sessions(server_name)
+        return jsonify({"message": "Analytics refreshed successfully", "data": analytics}), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to refresh analytics: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/analytics/playtime', methods=['GET'])
+def get_player_playtime(server_name):
+    """Get player playtime statistics."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    analytics = load_analytics(server_name)
+    players_data = analytics.get('players', {})
+    
+    # Convert to list and sort by total playtime
+    playtime_list = []
+    for player_name, data in players_data.items():
+        playtime_list.append({
+            'player': player_name,
+            'total_playtime': data['total_playtime'],
+            'total_playtime_hours': round(data['total_playtime'] / 3600, 2),
+            'join_count': data['join_count'],
+            'first_join': data['first_join'],
+            'last_join': data['last_join']
+        })
+    
+    playtime_list.sort(key=lambda x: x['total_playtime'], reverse=True)
+    return jsonify(playtime_list)
+
+@app.route('/api/servers/<server_name>/analytics/peak-hours', methods=['GET'])
+def get_peak_hours(server_name):
+    """Get peak player hours statistics."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    analytics = load_analytics(server_name)
+    sessions = analytics.get('sessions', [])
+    
+    # Initialize hour buckets (0-23)
+    hour_counts = {str(hour): 0 for hour in range(24)}
+    
+    for session in sessions:
+        join_time = session['join_time']
+        leave_time = session['leave_time']
+        
+        # Count each hour the player was online
+        join_datetime = time.localtime(join_time)
+        leave_datetime = time.localtime(leave_time)
+        
+        current_hour = join_datetime.tm_hour
+        end_hour = leave_datetime.tm_hour
+        
+        # Handle sessions spanning multiple hours
+        hours_online = int((leave_time - join_time) / 3600) + 1
+        for i in range(hours_online):
+            hour_key = str((current_hour + i) % 24)
+            hour_counts[hour_key] += 1
+    
+    return jsonify(hour_counts)
+
+@app.route('/api/servers/<server_name>/analytics/sessions', methods=['GET'])
+def get_recent_sessions(server_name):
+    """Get recent player sessions."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    analytics = load_analytics(server_name)
+    sessions = analytics.get('sessions', [])
+    
+    # Get the last 50 sessions
+    recent_sessions = sessions[-50:] if len(sessions) > 50 else sessions
+    recent_sessions.reverse()  # Most recent first
+    
+    # Format for display
+    formatted_sessions = []
+    for session in recent_sessions:
+        formatted_sessions.append({
+            'player': session['player'],
+            'join_time': session['join_time'],
+            'leave_time': session.get('leave_time'),
+            'duration': session.get('duration', 0),
+            'duration_minutes': round(session.get('duration', 0) / 60, 2)
+        })
+    
+    return jsonify(formatted_sessions)
+
+@app.route('/api/servers/<server_name>/analytics/online', methods=['GET'])
+def get_online_players(server_name):
+    """Get currently online players by parsing the latest log."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    log_file = os.path.join(server_path, 'logs', 'latest.log')
+    if not os.path.exists(log_file):
+        return jsonify([])
+    
+    online_players = set()
+    join_pattern = re.compile(r'\[.*?\]: (.*?) joined the game')
+    leave_pattern = re.compile(r'\[.*?\]: (.*?) left the game')
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                join_match = join_pattern.search(line)
+                if join_match:
+                    online_players.add(join_match.group(1))
+                
+                leave_match = leave_pattern.search(line)
+                if leave_match:
+                    online_players.discard(leave_match.group(1))
+        
+        return jsonify(list(online_players))
+    except Exception as e:
+        print(f"Error getting online players: {e}")
+        return jsonify([])
+
+# --- Plugin/Mod Management ---
+
+def get_plugins_folder_path(server_name):
+    """Returns the path to the plugins/mods folder based on server type."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    metadata = get_server_metadata(server_path)
+    server_type = metadata.get('server_type', 'vanilla').lower()
+    
+    # Plugin-based servers use 'plugins' folder
+    if server_type in ['paper', 'purpur', 'spigot', 'bukkit']:
+        return os.path.join(server_path, 'plugins')
+    # Mod-based servers use 'mods' folder
+    elif server_type in ['fabric', 'forge', 'neoforge', 'quilt']:
+        return os.path.join(server_path, 'mods')
+    else:
+        return None
+
+def supports_plugins_or_mods(server_name):
+    """Check if a server supports plugins or mods."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    metadata = get_server_metadata(server_path)
+    server_type = metadata.get('server_type', 'vanilla').lower()
+    return server_type in ['paper', 'purpur', 'spigot', 'bukkit', 'fabric', 'forge', 'neoforge', 'quilt']
+
+@app.route('/api/servers/<server_name>/plugins', methods=['GET'])
+def list_plugins(server_name):
+    """Lists all installed plugins/mods for a server."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    if not supports_plugins_or_mods(server_name):
+        return jsonify({"error": "This server type does not support plugins or mods"}), 400
+    
+    plugins_folder = get_plugins_folder_path(server_name)
+    if not plugins_folder or not os.path.exists(plugins_folder):
+        os.makedirs(plugins_folder, exist_ok=True)
+        return jsonify([])
+    
+    plugins = []
+    for filename in os.listdir(plugins_folder):
+        if filename.endswith('.jar'):
+            file_path = os.path.join(plugins_folder, filename)
+            file_size = os.path.getsize(file_path)
+            plugins.append({
+                'name': filename,
+                'filename': filename,
+                'size': file_size,
+                'size_mb': round(file_size / (1024 * 1024), 2)
+            })
+    
+    return jsonify(plugins)
+
+@app.route('/api/servers/<server_name>/plugins/search', methods=['GET'])
+def search_plugins(server_name):
+    """Search for plugins/mods from Modrinth."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    if not supports_plugins_or_mods(server_name):
+        return jsonify({"error": "This server type does not support plugins or mods"}), 400
+    
+    query = request.args.get('query', '')
+    metadata = get_server_metadata(server_path)
+    server_type = metadata.get('server_type', 'vanilla').lower()
+    mc_version = metadata.get('version', '')
+    
+    # Determine facets based on server type
+    if server_type in ['paper', 'purpur', 'spigot', 'bukkit']:
+        facets = [["project_type:plugin"], [f"versions:{mc_version}"]]
+    elif server_type in ['fabric', 'quilt']:
+        facets = [["project_type:mod"], [f"versions:{mc_version}"], [f"categories:{server_type}"]]
+    elif server_type in ['forge', 'neoforge']:
+        facets = [["project_type:mod"], [f"versions:{mc_version}"], ["categories:forge"]]
+    else:
+        return jsonify([])
+    
+    try:
+        # Search Modrinth API
+        url = "https://api.modrinth.com/v2/search"
+        params = {
+            'query': query,
+            'facets': json.dumps(facets),
+            'limit': 20
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        results = []
+        for hit in data.get('hits', []):
+            results.append({
+                'id': hit.get('project_id'),
+                'name': hit.get('title'),
+                'slug': hit.get('slug'),
+                'description': hit.get('description', ''),
+                'author': hit.get('author', 'Unknown'),
+                'downloads': hit.get('downloads', 0),
+                'icon_url': hit.get('icon_url'),
+                'categories': hit.get('categories', []),
+                'client_side': hit.get('client_side', 'unknown'),
+                'server_side': hit.get('server_side', 'unknown'),
+                'source': 'modrinth'
+            })
+        
+        return jsonify(results)
+        
+    except requests.RequestException as e:
+        return jsonify({"error": f"Failed to search plugins: {e}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/plugins/install', methods=['POST'])
+def install_plugin(server_name):
+    """Install a plugin/mod from Modrinth."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    if not supports_plugins_or_mods(server_name):
+        return jsonify({"error": "This server type does not support plugins or mods"}), 400
+    
+    data = request.get_json()
+    project_id = data.get('project_id')
+    
+    if not project_id:
+        return jsonify({"error": "project_id is required"}), 400
+    
+    metadata = get_server_metadata(server_path)
+    mc_version = metadata.get('version', '')
+    server_type = metadata.get('server_type', 'vanilla').lower()
+    
+    plugins_folder = get_plugins_folder_path(server_name)
+    os.makedirs(plugins_folder, exist_ok=True)
+    
+    try:
+        # Get project versions from Modrinth
+        url = f"https://api.modrinth.com/v2/project/{project_id}/version"
+        params = {
+            'game_versions': json.dumps([mc_version])
+        }
+        
+        # Add loader filter
+        if server_type in ['fabric', 'quilt', 'forge', 'neoforge']:
+            params['loaders'] = json.dumps([server_type])
+        elif server_type in ['paper', 'purpur']:
+            params['loaders'] = json.dumps(['paper', 'spigot', 'bukkit'])
+        elif server_type == 'spigot':
+            params['loaders'] = json.dumps(['spigot', 'bukkit'])
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        versions = response.json()
+        
+        if not versions:
+            return jsonify({"error": "No compatible version found for your Minecraft version"}), 404
+        
+        # Get the latest version
+        latest_version = versions[0]
+        
+        # Find the primary file
+        primary_file = None
+        for file in latest_version.get('files', []):
+            if file.get('primary', False):
+                primary_file = file
+                break
+        
+        if not primary_file:
+            primary_file = latest_version['files'][0] if latest_version.get('files') else None
+        
+        if not primary_file:
+            return jsonify({"error": "No downloadable file found"}), 404
+        
+        download_url = primary_file.get('url')
+        filename = primary_file.get('filename')
+        
+        # Download the file
+        file_response = requests.get(download_url, stream=True, timeout=30)
+        file_response.raise_for_status()
+        
+        file_path = os.path.join(plugins_folder, filename)
+        with open(file_path, 'wb') as f:
+            for chunk in file_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        return jsonify({
+            "message": f"Successfully installed {filename}",
+            "filename": filename,
+            "version": latest_version.get('version_number')
+        }), 201
+        
+    except requests.RequestException as e:
+        return jsonify({"error": f"Failed to download plugin: {e}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/plugins/<path:filename>', methods=['DELETE'])
+def delete_plugin(server_name, filename):
+    """Delete a plugin/mod file."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    if not supports_plugins_or_mods(server_name):
+        return jsonify({"error": "This server type does not support plugins or mods"}), 400
+    
+    plugins_folder = get_plugins_folder_path(server_name)
+    if not plugins_folder:
+        return jsonify({"error": "Plugins folder not found"}), 404
+    
+    # Security: prevent directory traversal
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    
+    file_path = os.path.join(plugins_folder, filename)
+    
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Plugin file not found"}), 404
+    
+    try:
+        os.remove(file_path)
+        return jsonify({"message": f"Successfully deleted {filename}"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to delete plugin: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/plugins/info/<project_id>', methods=['GET'])
+def get_plugin_info(server_name, project_id):
+    """Get detailed information about a plugin from Modrinth."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    try:
+        url = f"https://api.modrinth.com/v2/project/{project_id}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        project_data = response.json()
+        
+        return jsonify({
+            'id': project_data.get('id'),
+            'slug': project_data.get('slug'),
+            'title': project_data.get('title'),
+            'description': project_data.get('description'),
+            'body': project_data.get('body'),
+            'categories': project_data.get('categories', []),
+            'client_side': project_data.get('client_side'),
+            'server_side': project_data.get('server_side'),
+            'downloads': project_data.get('downloads', 0),
+            'followers': project_data.get('followers', 0),
+            'icon_url': project_data.get('icon_url'),
+            'license': project_data.get('license', {}).get('name'),
+            'versions': project_data.get('versions', []),
+            'source_url': project_data.get('source_url'),
+            'wiki_url': project_data.get('wiki_url'),
+            'discord_url': project_data.get('discord_url')
+        })
+        
+    except requests.RequestException as e:
+        return jsonify({"error": f"Failed to fetch plugin info: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/supports-plugins', methods=['GET'])
+def check_plugin_support(server_name):
+    """Check if the server supports plugins/mods."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    metadata = get_server_metadata(server_path)
+    server_type = metadata.get('server_type', 'vanilla').lower()
+    
+    supports = supports_plugins_or_mods(server_name)
+    folder_type = 'plugins' if server_type in ['paper', 'purpur', 'spigot', 'bukkit'] else 'mods'
+    
+    return jsonify({
+        'supports': supports,
+        'server_type': server_type,
+        'folder_type': folder_type
+    })
+
+# --- World Management ---
+
+def get_directory_size(path):
+    """Calculate the total size of a directory in bytes."""
+    total_size = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(path):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                try:
+                    total_size += os.path.getsize(filepath)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return total_size
+
+def get_world_folders(server_path):
+    """Find all world folders in a server directory."""
+    worlds = []
+    
+    # Common world folder patterns
+    world_indicators = ['level.dat', 'session.lock']
+    
+    # Check main directory and subdirectories
+    for item in os.listdir(server_path):
+        item_path = os.path.join(server_path, item)
+        if os.path.isdir(item_path):
+            # Check if this directory contains world data
+            has_world_data = any(
+                os.path.exists(os.path.join(item_path, indicator))
+                for indicator in world_indicators
+            )
+            
+            if has_world_data:
+                size = get_directory_size(item_path)
+                worlds.append({
+                    'name': item,
+                    'path': item,
+                    'size': size,
+                    'size_mb': round(size / (1024 * 1024), 2),
+                    'has_nether': os.path.isdir(os.path.join(item_path, 'DIM-1')),
+                    'has_end': os.path.isdir(os.path.join(item_path, 'DIM1'))
+                })
+    
+    return worlds
+
+@app.route('/api/servers/<server_name>/worlds', methods=['GET'])
+def list_worlds(server_name):
+    """List all world folders in the server directory."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    try:
+        worlds = get_world_folders(server_path)
+        return jsonify(worlds)
+    except Exception as e:
+        return jsonify({"error": f"Failed to list worlds: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/worlds/<world_name>/download', methods=['GET'])
+def download_world(server_name, world_name):
+    """Download a world folder as a ZIP file."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    # Sanitize world name
+    if '..' in world_name or '/' in world_name or '\\' in world_name:
+        return jsonify({"error": "Invalid world name"}), 400
+    
+    world_path = os.path.join(server_path, world_name)
+    if not os.path.isdir(world_path):
+        return jsonify({"error": "World not found"}), 404
+    
+    # Check if level.dat exists to confirm it's a world folder
+    if not os.path.exists(os.path.join(world_path, 'level.dat')):
+        return jsonify({"error": "Not a valid world folder"}), 400
+    
+    try:
+        # Create a temporary ZIP file
+        zip_filename = f"{world_name}_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+        zip_path = os.path.join(server_path, zip_filename)
+        
+        # Create ZIP file
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(world_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, server_path)
+                    zipf.write(file_path, arcname)
+        
+        # Send the file
+        response = send_from_directory(
+            server_path,
+            zip_filename,
+            as_attachment=True,
+            download_name=zip_filename
+        )
+        
+        # Schedule deletion of the ZIP file after sending
+        @response.call_on_close
+        def cleanup():
+            try:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+            except Exception as e:
+                print(f"Error cleaning up ZIP file: {e}")
+        
+        return response
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to create world download: {e}"}), 500
+
+@app.route('/api/servers/<server_name>/worlds/upload', methods=['POST'])
+def upload_world(server_name):
+    """Upload and extract a world ZIP file."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    # Check if server is running
+    if is_server_running(server_name):
+        return jsonify({"error": "Cannot upload world while server is running. Please stop the server first."}), 400
+    
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    if not file.filename.endswith('.zip'):
+        return jsonify({"error": "File must be a ZIP archive"}), 400
+    
+    world_name = request.form.get('world_name', 'world')
+    
+    # Sanitize world name
+    world_name = secure_filename(world_name)
+    if not world_name:
+        world_name = 'world'
+    
+    world_path = os.path.join(server_path, world_name)
+    
+    try:
+        # Save uploaded file temporarily
+        temp_zip = os.path.join(server_path, f'temp_world_{uuid.uuid4().hex}.zip')
+        file.save(temp_zip)
+        
+        # Backup existing world if it exists
+        if os.path.exists(world_path):
+            backup_path = os.path.join(server_path, f'{world_name}_backup_{time.strftime("%Y%m%d_%H%M%S")}')
+            shutil.move(world_path, backup_path)
+        
+        # Extract ZIP file
+        os.makedirs(world_path, exist_ok=True)
+        
+        with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+            # Check if ZIP contains a single top-level directory
+            namelist = zip_ref.namelist()
+            if namelist:
+                first_item = namelist[0]
+                if '/' in first_item:
+                    # ZIP has a top-level directory, extract and move contents
+                    temp_extract = os.path.join(server_path, f'temp_extract_{uuid.uuid4().hex}')
+                    zip_ref.extractall(temp_extract)
+                    
+                    # Find the world folder inside
+                    extracted_items = os.listdir(temp_extract)
+                    if len(extracted_items) == 1 and os.path.isdir(os.path.join(temp_extract, extracted_items[0])):
+                        # Move contents of the single directory
+                        extracted_world = os.path.join(temp_extract, extracted_items[0])
+                        for item in os.listdir(extracted_world):
+                            shutil.move(
+                                os.path.join(extracted_world, item),
+                                os.path.join(world_path, item)
+                            )
+                        shutil.rmtree(temp_extract)
+                    else:
+                        # Move all extracted items
+                        for item in extracted_items:
+                            shutil.move(
+                                os.path.join(temp_extract, item),
+                                os.path.join(world_path, item)
+                            )
+                        shutil.rmtree(temp_extract)
+                else:
+                    # Extract directly
+                    zip_ref.extractall(world_path)
+        
+        # Clean up temp ZIP
+        os.remove(temp_zip)
+        
+        # Verify it's a valid world
+        if not os.path.exists(os.path.join(world_path, 'level.dat')):
+            return jsonify({"error": "Uploaded file does not contain a valid Minecraft world (missing level.dat)"}), 400
+        
+        return jsonify({"message": f"World '{world_name}' uploaded successfully"}), 201
+        
+    except zipfile.BadZipFile:
+        return jsonify({"error": "Invalid ZIP file"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to upload world: {e}"}), 500
+    finally:
+        # Clean up temp file if it still exists
+        if 'temp_zip' in locals() and os.path.exists(temp_zip):
+            try:
+                os.remove(temp_zip)
+            except:
+                pass
+
+@app.route('/api/servers/<server_name>/worlds/<world_name>/dimension/<dimension>', methods=['DELETE'])
+def reset_dimension(server_name, world_name, dimension):
+    """Reset a world dimension (Nether or End)."""
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    # Check if server is running
+    if is_server_running(server_name):
+        return jsonify({"error": "Cannot reset dimension while server is running. Please stop the server first."}), 400
+    
+    # Sanitize names
+    if '..' in world_name or '/' in world_name or '\\' in world_name:
+        return jsonify({"error": "Invalid world name"}), 400
+    
+    world_path = os.path.join(server_path, world_name)
+    if not os.path.isdir(world_path):
+        return jsonify({"error": "World not found"}), 404
+    
+    # Map dimension names to folder names
+    dimension_folders = {
+        'nether': 'DIM-1',
+        'end': 'DIM1'
+    }
+    
+    if dimension not in dimension_folders:
+        return jsonify({"error": "Invalid dimension. Must be 'nether' or 'end'"}), 400
+    
+    dimension_path = os.path.join(world_path, dimension_folders[dimension])
+    
+    if not os.path.exists(dimension_path):
+        return jsonify({"error": f"{dimension.capitalize()} dimension does not exist"}), 404
+    
+    try:
+        # Create backup before deletion
+        backup_path = os.path.join(
+            server_path,
+            f'{world_name}_{dimension}_backup_{time.strftime("%Y%m%d_%H%M%S")}'
+        )
+        shutil.copytree(dimension_path, backup_path)
+        
+        # Delete dimension
+        shutil.rmtree(dimension_path)
+        
+        return jsonify({
+            "message": f"{dimension.capitalize()} dimension reset successfully. Backup saved to {os.path.basename(backup_path)}"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to reset dimension: {e}"}), 500
+
+# --- Frontend Routes ---
+
+@app.route('/')
+def serve_index():
+    """Serve the main index.html page."""
+    return send_from_directory('..', 'index.html')
+
+@app.route('/server-details.html')
+def serve_server_details():
+    """Serve the server details page."""
+    return send_from_directory('..', 'server-details.html')
+
+@app.route('/credits.html')
+def serve_credits():
+    """Serve the credits page."""
+    return send_from_directory('..', 'credits.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    """Serve static files (CSS, JS, images)."""
+    return send_from_directory('..', path)
+
+# --- Server Templates ---
+
+def ensure_templates_dir():
+    """Ensure the templates directory exists."""
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+
+@app.route('/api/templates', methods=['GET'])
+def list_templates():
+    """List all saved server templates."""
+    ensure_templates_dir()
+    
+    templates = []
+    try:
+        for filename in os.listdir(TEMPLATES_DIR):
+            if filename.endswith('.json'):
+                template_path = os.path.join(TEMPLATES_DIR, filename)
+                try:
+                    with open(template_path, 'r') as f:
+                        template_data = json.load(f)
+                        templates.append({
+                            'id': filename[:-5],  # Remove .json extension
+                            'name': template_data.get('name', filename[:-5]),
+                            'description': template_data.get('description', ''),
+                            'server_type': template_data.get('server_type', 'Unknown'),
+                            'version': template_data.get('version', 'Unknown'),
+                            'created_at': template_data.get('created_at', ''),
+                            'created_from': template_data.get('created_from', '')
+                        })
+                except (json.JSONDecodeError, IOError):
+                    continue
+        
+        return jsonify(templates)
+    except Exception as e:
+        return jsonify({"error": f"Failed to list templates: {e}"}), 500
+
+@app.route('/api/templates', methods=['POST'])
+def create_template():
+    """Create a template from an existing server."""
+    data = request.get_json()
+    server_name = data.get('server_name')
+    template_name = data.get('template_name')
+    description = data.get('description', '')
+    
+    if not server_name or not template_name:
+        return jsonify({"error": "server_name and template_name are required"}), 400
+    
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if not os.path.isdir(server_path):
+        return jsonify({"error": "Server not found"}), 404
+    
+    # Sanitize template name
+    template_id = secure_filename(template_name)
+    if not template_id:
+        return jsonify({"error": "Invalid template name"}), 400
+    
+    ensure_templates_dir()
+    template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    
+    try:
+        # Get server metadata
+        metadata = get_server_metadata(server_path)
+        properties = get_server_properties(server_path)
+        
+        # Load start script if exists
+        start_script_path = get_start_script_path(server_name)
+        start_script = {"commands": []}
+        if os.path.exists(start_script_path):
+            with open(start_script_path, 'r') as f:
+                start_script = json.load(f)
+        
+        # Load install script if exists
+        install_script_path = get_install_script_path(server_name)
+        install_script = {"commands": []}
+        if os.path.exists(install_script_path):
+            with open(install_script_path, 'r') as f:
+                install_script = json.load(f)
+        
+        # Create template
+        template = {
+            'name': template_name,
+            'description': description,
+            'server_type': metadata.get('server_type', 'vanilla'),
+            'version': metadata.get('version', 'Unknown'),
+            'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_from': server_name,
+            'config': {
+                'properties': properties,
+                'metadata': metadata,
+                'start_script': start_script,
+                'install_script': install_script
+            }
+        }
+        
+        # Save template
+        with open(template_file, 'w') as f:
+            json.dump(template, f, indent=4)
+        
+        return jsonify({
+            "message": f"Template '{template_name}' created successfully",
+            "template_id": template_id
+        }), 201
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to create template: {e}"}), 500
+
+@app.route('/api/templates/<template_id>', methods=['GET'])
+def get_template(template_id):
+    """Get a specific template."""
+    ensure_templates_dir()
+    
+    # Sanitize template ID
+    template_id = secure_filename(template_id)
+    template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    
+    if not os.path.exists(template_file):
+        return jsonify({"error": "Template not found"}), 404
+    
+    try:
+        with open(template_file, 'r') as f:
+            template = json.load(f)
+        return jsonify(template)
+    except Exception as e:
+        return jsonify({"error": f"Failed to load template: {e}"}), 500
+
+@app.route('/api/templates/<template_id>', methods=['DELETE'])
+def delete_template(template_id):
+    """Delete a template."""
+    ensure_templates_dir()
+    
+    # Sanitize template ID
+    template_id = secure_filename(template_id)
+    template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    
+    if not os.path.exists(template_file):
+        return jsonify({"error": "Template not found"}), 404
+    
+    try:
+        os.remove(template_file)
+        return jsonify({"message": f"Template '{template_id}' deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to delete template: {e}"}), 500
+
+@app.route('/api/templates/<template_id>/export', methods=['GET'])
+def export_template(template_id):
+    """Export a template as downloadable JSON."""
+    ensure_templates_dir()
+    
+    # Sanitize template ID
+    template_id = secure_filename(template_id)
+    template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    
+    if not os.path.exists(template_file):
+        return jsonify({"error": "Template not found"}), 404
+    
+    try:
+        return send_from_directory(
+            TEMPLATES_DIR,
+            f'{template_id}.json',
+            as_attachment=True,
+            download_name=f'server_template_{template_id}.json'
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to export template: {e}"}), 500
+
+@app.route('/api/templates/import', methods=['POST'])
+def import_template():
+    """Import a template from uploaded JSON file."""
+    ensure_templates_dir()
+    
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    if not file.filename.endswith('.json'):
+        return jsonify({"error": "File must be a JSON file"}), 400
+    
+    try:
+        # Load and validate JSON
+        template_data = json.load(file)
+        
+        # Validate required fields
+        if 'name' not in template_data:
+            return jsonify({"error": "Invalid template: missing 'name' field"}), 400
+        
+        # Generate template ID from name
+        template_id = secure_filename(template_data['name'])
+        if not template_id:
+            template_id = f"imported_{int(time.time())}"
+        
+        template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+        
+        # Check if template already exists
+        counter = 1
+        original_id = template_id
+        while os.path.exists(template_file):
+            template_id = f"{original_id}_{counter}"
+            template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+            counter += 1
+        
+        # Save template
+        with open(template_file, 'w') as f:
+            json.dump(template_data, f, indent=4)
+        
+        return jsonify({
+            "message": f"Template imported successfully as '{template_id}'",
+            "template_id": template_id
+        }), 201
+        
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON file"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to import template: {e}"}), 500
+
+@app.route('/api/servers/create-from-template', methods=['POST'])
+def create_server_from_template():
+    """Create a new server from a template."""
+    data = request.get_json()
+    template_id = data.get('template_id')
+    server_name = data.get('server_name')
+    port = data.get('port', 25565)
+    
+    if not template_id or not server_name:
+        return jsonify({"error": "template_id and server_name are required"}), 400
+    
+    # Sanitize server name
+    if not re.match("^[a-zA-Z0-9_-]+$", server_name):
+        return jsonify({"error": "Invalid server name format"}), 400
+    
+    # Check if server already exists
+    server_path = os.path.join(SERVERS_DIR, server_name)
+    if os.path.exists(server_path):
+        return jsonify({"error": "A server with this name already exists"}), 409
+    
+    # Check port
+    if is_port_in_use(port):
+        return jsonify({"error": f"Port {port} is already in use"}), 409
+    
+    # Load template
+    template_id = secure_filename(template_id)
+    template_file = os.path.join(TEMPLATES_DIR, f'{template_id}.json')
+    
+    if not os.path.exists(template_file):
+        return jsonify({"error": "Template not found"}), 404
+    
+    try:
+        with open(template_file, 'r') as f:
+            template = json.load(f)
+        
+        # Create server directory
+        os.makedirs(server_path)
+        
+        # Apply template configuration
+        config_data = template.get('config', {})
+        
+        # Write EULA
+        with open(os.path.join(server_path, 'eula.txt'), 'w') as f:
+            f.write('eula=true\n')
+        
+        # Write server.properties with template values
+        properties = config_data.get('properties', {})
+        properties['server-port'] = str(port)  # Override port with new value
+        
+        props_file = os.path.join(server_path, 'server.properties')
+        with open(props_file, 'w') as f:
+            for key, value in properties.items():
+                f.write(f"{key}={value}\n")
+        
+        # Write metadata
+        metadata = config_data.get('metadata', {})
+        metadata['created_from_template'] = template_id
+        write_server_metadata(server_path, metadata)
+        
+        # Create server config directory
+        server_config_dir = get_server_config_dir(server_name)
+        os.makedirs(server_config_dir, exist_ok=True)
+        
+        # Write start script
+        start_script = config_data.get('start_script', {"commands": ["java -Xmx2G -Xms1G -jar server.jar nogui"]})
+        start_script_path = get_start_script_path(server_name)
+        with open(start_script_path, 'w') as f:
+            json.dump(start_script, f, indent=4)
+        
+        # Write install script if present
+        install_script = config_data.get('install_script', {})
+        if install_script.get('commands'):
+            install_script_path = get_install_script_path(server_name)
+            with open(install_script_path, 'w') as f:
+                json.dump(install_script, f, indent=4)
+        
+        # Download server JAR
+        server_type = metadata.get('server_type', 'vanilla')
+        version = metadata.get('version', '1.21.1')
+        jar_url = f"https://mcutils.com/api/server-jars/{server_type}/{version}/download"
+        jar_path = os.path.join(server_path, 'server.jar')
+        download_jar(jar_url, jar_path)
+        
+        return jsonify({
+            "message": f"Server '{server_name}' created from template '{template.get('name', template_id)}'",
+            "server_name": server_name
+        }), 201
+        
+    except Exception as e:
+        # Cleanup on error
+        if os.path.exists(server_path):
+            shutil.rmtree(server_path)
+        return jsonify({"error": f"Failed to create server from template: {e}"}), 500
+
 if __name__ == '__main__':
     initialize_app()
-    app.run(debug=True, use_reloader=False)
+    
+    # Load host and port from config
+    host = config.get('host', '127.0.0.1')
+    port = config.get('port', 5000)
+    debug = config.get('debug', False)
+    
+    print(f"\n{'='*60}")
+    print(f"🚀 MineServerGUI Backend Starting...")
+    print(f"{'='*60}")
+    print(f"📍 Host: {host}")
+    print(f"🔌 Port: {port}")
+    print(f"🌐 URL: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+    print(f"🐛 Debug: {debug}")
+    print(f"{'='*60}\n")
+    
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
 else: # When run with 'flask run'
     initialize_app() 

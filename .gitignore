@@ -1,3 +1,5 @@
-help.md
-backend\__pycache__
-backend\server_configs
+/help.md
+/servers
+/backend/server_configs
+/backend/server_templates
+/backend/__pycache__

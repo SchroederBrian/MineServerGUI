@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+*.md
+FEATURES_IMPLEMENTATION.md
+IMPLEMENTATION_SUMMARY.md
+IMPLEMENTATION_UPDATE.md
+PLUGIN_MANAGER_FEATURE.md
+SERVER_TEMPLATES_FEATURE.md
+WORLD_MANAGEMENT_FEATURE.md
+QUICK_START_GUIDE.md
+DOCKER_SETUP.md
+DOCKER_IMPLEMENTATION.md
+
+# Docker
+docker/data/
+docker/.env
+docker/env.example
+
+# Server data (will be mounted as volumes)
+servers/
+backend/server_configs/
+backend/server_templates/
+backend/backups/
+
+# Logs
+*.log
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/

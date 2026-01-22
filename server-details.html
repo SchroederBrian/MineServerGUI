@@ -89,6 +89,15 @@
                                 <button class="nav-link" id="scheduler-tab" data-bs-toggle="tab" data-bs-target="#scheduler-pane" type="button" role="tab"><i class="fas fa-clock me-2"></i>Task Scheduler</button>
                             </li>
                             <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="worlds-tab" data-bs-toggle="tab" data-bs-target="#worlds-pane" type="button" role="tab"><i class="fas fa-globe me-2"></i>Worlds</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="analytics-tab" data-bs-toggle="tab" data-bs-target="#analytics-pane" type="button" role="tab"><i class="fas fa-chart-line me-2"></i>Analytics</button>
+                            </li>
+                            <li class="nav-item" role="presentation" id="plugins-tab-nav" style="display: none;">
+                                <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-pane" type="button" role="tab"><i class="fas fa-puzzle-piece me-2"></i>Plugins/Mods</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-pane" type="button" role="tab"><i class="fas fa-cog me-2"></i>Settings</button>
                             </li>
                         </ul>
@@ -115,7 +124,7 @@
                             </div>
                             <!-- Console Pane -->
                             <div class="tab-pane fade" id="console-pane" role="tabpanel">
-                                 <p class="text-body-secondary small mb-2">Send commands directly to the running server.</p>
+                                <p class="text-body-secondary small mb-2">Send commands directly to the running server.</p>
                                 <div class="input-group mb-3">
                                     <span class="input-group-text bg-dark-tertiary">></span>
                                     <input type="text" id="console-input" class="form-control bg-dark-tertiary" placeholder="Enter command...">
@@ -186,7 +195,13 @@
                             <div class="tab-pane fade" id="file-explorer-pane" role="tabpanel">
                                 <div id="file-explorer-view">
                                     <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <nav id="breadcrumb" style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"></nav>
+                                        <nav aria-label="breadcrumb">
+                                            <ol id="breadcrumb" class="breadcrumb breadcrumb-dark mb-0" style="--bs-breadcrumb-divider: '>';">
+                                                <li class="breadcrumb-item">
+                                                    <a href="#" onclick="event.preventDefault(); fetchFiles('.');">root</a>
+                                                </li>
+                                            </ol>
+                                        </nav>
                                         <div>
                                             <input type="file" id="file-upload-input" multiple style="display: none;" />
                                             <button id="upload-btn" class="btn btn-sm btn-success me-2"><i class="fas fa-upload me-2"></i>Upload</button>
@@ -232,20 +247,259 @@
                                     <!-- Scheduled tasks will be dynamically inserted here -->
                                 </div>
                             </div>
+                            
+                            <!-- Worlds Pane -->
+                            <div class="tab-pane fade" id="worlds-pane" role="tabpanel">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h3 class="h5 mb-0"><i class="fas fa-globe me-2"></i>World Management</h3>
+                                    <button id="refresh-worlds-btn" class="btn btn-primary btn-sm"><i class="fas fa-sync-alt me-2"></i>Refresh</button>
+                                </div>
+                                
+                                <!-- Upload World -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-upload me-2"></i>Upload World</h5>
+                                        <p class="text-body-secondary small mb-3">Upload a world ZIP file. Server must be stopped.</p>
+                                        
+                                        <form id="world-upload-form">
+                                            <div class="row g-3 mb-3">
+                                                <div class="col-md-6">
+                                                    <input type="text" id="world-name-input" class="form-control" placeholder="World folder name (e.g., 'world')" value="world">
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <input type="file" id="world-file-input" class="form-control" accept=".zip">
+                                                </div>
+                                            </div>
+                                            <button type="submit" id="upload-world-btn" class="btn btn-success">
+                                                <i class="fas fa-upload me-2"></i>Upload World
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                                
+                                <!-- World List -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-folder me-2"></i>Server Worlds</h5>
+                                        <div id="worlds-list-container">
+                                            <div class="text-body-secondary text-center p-3" id="no-worlds-msg">
+                                                Loading worlds...
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Plugins/Mods Pane -->
+                            <div class="tab-pane fade" id="plugins-pane" role="tabpanel">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h3 class="h5 mb-0"><i class="fas fa-puzzle-piece me-2"></i><span id="plugin-manager-title">Plugin Manager</span></h3>
+                                    <button id="refresh-plugins-btn" class="btn btn-primary btn-sm"><i class="fas fa-sync-alt me-2"></i>Refresh</button>
+                                </div>
+                                
+                                <!-- Search for Plugins -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-search me-2"></i>Browse & Install</h5>
+                                        <p class="text-body-secondary small mb-3">Search and install plugins from Modrinth</p>
+                                        
+                                        <div class="input-group mb-3">
+                                            <input type="text" id="plugin-search-input" class="form-control" placeholder="Search for plugins...">
+                                            <button id="plugin-search-btn" class="btn btn-success"><i class="fas fa-search me-2"></i>Search</button>
+                                        </div>
+                                        
+                                        <!-- Search Results -->
+                                        <div id="plugin-search-results" class="mt-3" style="display: none;">
+                                            <h6 class="mb-3">Search Results:</h6>
+                                            <div id="plugin-search-results-container" class="list-group list-group-dark">
+                                                <!-- Results will be inserted here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Installed Plugins -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-box me-2"></i>Installed <span id="installed-plugin-type">Plugins</span></h5>
+                                        <div id="installed-plugins-container" class="list-group list-group-dark">
+                                            <div class="text-body-secondary text-center p-3" id="no-plugins-msg">
+                                                Loading plugins...
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Analytics Pane -->
+                            <div class="tab-pane fade" id="analytics-pane" role="tabpanel">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h3 class="h5 mb-0"><i class="fas fa-chart-bar me-2"></i>Player Session Analytics</h3>
+                                    <button id="refresh-analytics-btn" class="btn btn-primary btn-sm"><i class="fas fa-sync-alt me-2"></i>Refresh Data</button>
+                                </div>
+                                <p class="text-body-secondary small mb-3">Track player behavior, playtime, and server activity patterns.</p>
+                                
+                                <!-- Currently Online Players -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-circle text-success me-2"></i>Currently Online</h5>
+                                        <div id="online-players-list" class="d-flex flex-wrap gap-2 mt-2">
+                                            <span class="text-body-secondary">No players online</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Player Playtime Statistics -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-clock me-2"></i>Player Playtime</h5>
+                                        <div id="playtime-table-container" class="table-responsive">
+                                            <table class="table table-dark table-striped table-hover">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Player</th>
+                                                        <th>Total Playtime</th>
+                                                        <th>Join Count</th>
+                                                        <th>First Seen</th>
+                                                        <th>Last Seen</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="playtime-table-body">
+                                                    <tr>
+                                                        <td colspan="5" class="text-center text-body-secondary">No data available</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Peak Hours Heatmap -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-fire me-2"></i>Peak Player Hours</h5>
+                                        <p class="text-body-secondary small">Shows when players are most active on your server</p>
+                                        <div id="peak-hours-chart" class="mt-3">
+                                            <!-- Heatmap will be generated here -->
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Recent Sessions -->
+                                <div class="card bg-dark-tertiary mb-4">
+                                    <div class="card-body">
+                                        <h5 class="card-title"><i class="fas fa-history me-2"></i>Recent Sessions</h5>
+                                        <div id="recent-sessions-container" class="list-group list-group-dark">
+                                            <div class="text-body-secondary text-center p-3">No session data available</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <!-- Settings Pane -->
                             <div class="tab-pane fade" id="settings-pane" role="tabpanel">
+                                <!-- Player Management Section -->
+                                <div class="mb-4">
+                                    <h4 class="h5 mb-3"><i class="fas fa-users me-2"></i>Player Management</h4>
+                                    
+                                    <!-- Whitelist Section -->
+                                    <div class="p-3 rounded bg-dark-tertiary mb-3">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <h5 class="h6 mb-0"><i class="fas fa-clipboard-list me-2"></i>Whitelist Management</h5>
+                                        </div>
+                                        <p class="text-body-secondary small mb-3">Manage which players are allowed to join your server. Players not on the whitelist will be denied access.</p>
+                                        
+                                        <!-- Add Player to Whitelist -->
+                                        <div class="input-group mb-3">
+                                            <input type="text" id="whitelist-username-input" class="form-control" placeholder="Enter Minecraft username">
+                                            <button id="add-whitelist-btn" class="btn btn-success"><i class="fas fa-plus me-2"></i>Add to Whitelist</button>
+                                        </div>
+                                        
+                                        <!-- Whitelist Players List -->
+                                        <div id="whitelist-container" class="list-group list-group-dark">
+                                            <div class="text-body-secondary text-center p-3" id="no-whitelist-msg">
+                                                Loading whitelist...
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Operators Section -->
+                                    <div class="p-3 rounded bg-dark-tertiary mb-3">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <h5 class="h6 mb-0"><i class="fas fa-user-shield me-2"></i>Operator Management</h5>
+                                        </div>
+                                        <p class="text-body-secondary small mb-3">Grant or revoke operator (admin) permissions. Operators can use commands and manage the server.</p>
+                                        
+                                        <!-- Add Operator -->
+                                        <div class="row g-2 mb-3">
+                                            <div class="col-md-8">
+                                                <input type="text" id="op-username-input" class="form-control" placeholder="Enter Minecraft username">
+                                            </div>
+                                            <div class="col-md-2">
+                                                <select id="op-level-select" class="form-select" title="Permission Level">
+                                                    <option value="4" selected>Level 4</option>
+                                                    <option value="3">Level 3</option>
+                                                    <option value="2">Level 2</option>
+                                                    <option value="1">Level 1</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <button id="add-op-btn" class="btn btn-warning w-100"><i class="fas fa-crown me-2"></i>Add Op</button>
+                                            </div>
+                                        </div>
+                                        <div class="alert alert-info alert-sm">
+                                            <small>
+                                                <strong>Permission Levels:</strong><br>
+                                                Level 1: Bypass spawn protection<br>
+                                                Level 2: Use /clear, /difficulty, /effect, /gamemode, /gamerule, /give, /tp<br>
+                                                Level 3: Use /ban, /deop, /kick, /op<br>
+                                                Level 4: Use /stop (Full permissions)
+                                            </small>
+                                        </div>
+                                        
+                                        <!-- Operators List -->
+                                        <div id="operators-container" class="list-group list-group-dark">
+                                            <div class="text-body-secondary text-center p-3" id="no-operators-msg">
+                                                Loading operators...
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Save as Template Section -->
+                                <div class="p-3 rounded bg-dark-tertiary mb-4">
+                                    <h4 class="h5 mb-3"><i class="fas fa-save me-2"></i>Save as Template</h4>
+                                    <p class="text-body-secondary small mb-3">Save this server's configuration as a reusable template</p>
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <input type="text" id="template-name-input" class="form-control" placeholder="Template name">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" id="template-desc-input" class="form-control" placeholder="Description (optional)">
+                                        </div>
+                                        <div class="col-12">
+                                            <button id="save-as-template-btn" class="btn btn-success w-100">
+                                                <i class="fas fa-file-export me-2"></i>Save as Template
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Server Configuration Section -->
+                                <h4 class="h5 mb-3"><i class="fas fa-cog me-2"></i>Server Configuration</h4>
+                                
                                 <div id="install-panel" class="p-3 rounded bg-dark-tertiary mb-4">
-                                     <h3 class="h5 mb-3">Server Installation Script</h3>
-                                     <p class="text-body-secondary small">Define a sequence of commands to run for one-time installations or updates.</p>
-                                     <div id="command-list" class="list-group list-group-dark mb-3"></div>
-                                     <div class="input-group mb-3">
-                                         <input type="text" id="new-command-input" class="form-control" placeholder="e.g., curl -O <url>">
-                                         <button id="add-command-btn" class="btn btn-success" title="Add Command"><i class="fas fa-plus"></i></button>
-                                     </div>
-                                     <div class="d-flex justify-content-end gap-2">
-                                         <button id="save-script-btn" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save Script</button>
-                                         <button id="run-install-btn" class="btn btn-warning"><i class="fas fa-cogs me-2"></i>Run Installation</button>
-                                     </div>
+                                    <h3 class="h5 mb-3">Server Installation Script</h3>
+                                    <p class="text-body-secondary small">Define a sequence of commands to run for one-time installations or updates.</p>
+                                    <div id="command-list" class="list-group list-group-dark mb-3"></div>
+                                    <div class="input-group mb-3">
+                                        <input type="text" id="new-command-input" class="form-control" placeholder="e.g., curl -O <url>">
+                                        <button id="add-command-btn" class="btn btn-success" title="Add Command"><i class="fas fa-plus"></i></button>
+                                    </div>
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button id="save-script-btn" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save Script</button>
+                                        <button id="run-install-btn" class="btn btn-warning"><i class="fas fa-cogs me-2"></i>Run Installation</button>
+                                    </div>
                                 </div>
 
                                 <div id="start-commands-panel" class="p-3 rounded bg-dark-tertiary mb-4">
@@ -259,7 +513,7 @@
                                     <div class="d-flex justify-content-end gap-2">
                                         <button id="save-start-script-btn" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save Script</button>
                                     </div>
-                               </div>
+                                </div>
 
                                 <div id="ram-panel" class="p-3 rounded bg-dark-tertiary mb-4">
                                     <h3 class="h5 mb-3">RAM Allocation</h3>
@@ -318,11 +572,11 @@
                                 </div>
                                 
                                 <div id="danger-zone" class="p-3 rounded border border-danger mt-4">
-                                     <h3 class="h5 mb-3 text-danger"><i class="fas fa-exclamation-triangle me-2"></i>Danger Zone</h3>
-                                     <p class="text-body-secondary small">These actions are permanent and cannot be undone.</p>
-                                     <div class="d-grid">
-                                         <button id="delete-server-btn" class="btn btn-danger"><i class="fas fa-trash-alt me-2"></i>Delete This Server</button>
-                                     </div>
+                                    <h3 class="h5 mb-3 text-danger"><i class="fas fa-exclamation-triangle me-2"></i>Danger Zone</h3>
+                                    <p class="text-body-secondary small">These actions are permanent and cannot be undone.</p>
+                                    <div class="d-grid">
+                                        <button id="delete-server-btn" class="btn btn-danger"><i class="fas fa-trash-alt me-2"></i>Delete This Server</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -347,7 +601,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="selectDirectoryBtn">Select This Directory</button>
                 </div>
             </div>
@@ -359,4 +613,4 @@
     <script src="https://cdn.jsdelivr.net/npm/cronstrue@2.49.0/dist/cronstrue.min.js"></script>
     <script src="js/details.js"></script>
 </body>
-</html> 
+</html>
