@@ -1,21 +1,30 @@
-MIT License
+Copyright (c) 2026 Brian Schröder / Keksgames
+All rights reserved.
 
-Copyright (c) 2025 SchroederBrian
+LICENSE GRANT
+Permission is granted to any person obtaining a copy of this software and associated files (the "Software") to:
+1) use the Software for personal or internal business purposes; and
+2) modify the Software for the same purposes; and
+3) submit those modifications to the original upstream repository as a pull request or patch for review.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+RESTRICTIONS
+You may not, in whole or in part:
+1) distribute, publish, share, sublicense, or otherwise redistribute the Software or any modified version of it
+   (including as source code, binaries, releases, mirrors, public forks, or re-hosted copies);
+2) sell, resell, rent, lease, offer as a service, or otherwise commercialize the Software or any derivative work;
+3) remove or alter any copyright, trademark, or license notices.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+CONTRIBUTIONS
+By submitting a pull request, patch, or other contribution to the upstream repository maintained by the copyright
+holder, you agree that your contribution is provided under a perpetual, worldwide, non-exclusive, royalty-free,
+irrevocable license to use, reproduce, modify, distribute, and sublicense your contribution as part of the Software,
+including under different license terms chosen by the copyright holder.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+OWNERSHIP
+The Software is licensed, not sold. All rights not expressly granted are reserved by the copyright holder.
+
+DISCLAIMER
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
