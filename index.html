@@ -27,6 +27,9 @@
                     <a href="credits.html" id="creditsBtn" class="btn btn-outline-secondary me-2" title="Credits">
                         <i class="fas fa-heart"></i>
                     </a>
+                    <button id="adminPanelBtn" class="btn btn-outline-info me-2" title="Admin Panel" data-bs-toggle="modal" data-bs-target="#adminPanelModal" style="display: none;">
+                        <i class="fas fa-users-cog"></i>
+                    </button>
                     <button id="settingsBtn" class="btn btn-outline-secondary me-2" title="Settings" data-bs-toggle="modal" data-bs-target="#settingsModal">
                         <i class="fas fa-cog"></i>
                     </button>
@@ -128,6 +131,285 @@
         </div>
     </div>
 
+    <!-- Admin Panel Modal -->
+    <div class="modal fade" id="adminPanelModal" tabindex="-1" aria-labelledby="adminPanelModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="adminPanelModalLabel"><i class="fas fa-users-cog me-2"></i>Admin Panel</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <ul class="nav nav-tabs mb-3" id="adminPanelTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users-panel" type="button" role="tab">
+                                <i class="fas fa-users me-2"></i>Users
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="groups-tab" data-bs-toggle="tab" data-bs-target="#groups-panel" type="button" role="tab">
+                                <i class="fas fa-user-friends me-2"></i>Groups
+                            </button>
+                        </li>
+                    </ul>
+                    
+                    <div class="tab-content">
+                        <!-- Users Panel -->
+                        <div class="tab-pane fade show active" id="users-panel" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0">User Management</h6>
+                                <button id="add-user-btn" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-plus me-1"></i>Add User
+                                </button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Username</th>
+                                            <th>Role</th>
+                                            <th>Status</th>
+                                            <th>Created</th>
+                                            <th class="text-center">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="users-table-body">
+                                        <tr>
+                                            <td colspan="5" class="text-center text-body-secondary">Loading users...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- Groups Panel -->
+                        <div class="tab-pane fade" id="groups-panel" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0">Group Management</h6>
+                                <button id="add-group-btn" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-plus me-1"></i>Create Group
+                                </button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Group Name</th>
+                                            <th>Description</th>
+                                            <th>Members</th>
+                                            <th>Created</th>
+                                            <th class="text-center">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="groups-table-body">
+                                        <tr>
+                                            <td colspan="5" class="text-center text-body-secondary">Loading groups...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add User Modal -->
+    <div class="modal fade" id="addUserModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="new-username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="new-username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="new-password" required>
+                        <div class="form-text">Minimum 6 characters</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-user-role" class="form-label">Role</label>
+                        <select class="form-select" id="new-user-role">
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="save-user-btn">Create User</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div class="modal fade" id="editUserModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-user-id">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" id="edit-username" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-password" class="form-label">New Password (leave blank to keep current)</label>
+                        <input type="password" class="form-control" id="edit-password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-user-role" class="form-label">Role</label>
+                        <select class="form-select" id="edit-user-role">
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="edit-user-active">
+                            <label class="form-check-label" for="edit-user-active">Account Active</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="update-user-btn">Update User</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Group Modal -->
+    <div class="modal fade" id="addGroupModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Group</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="new-group-name" class="form-label">Group Name</label>
+                        <input type="text" class="form-control" id="new-group-name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-group-description" class="form-label">Description</label>
+                        <textarea class="form-control" id="new-group-description" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="save-group-btn">Create Group</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Group Modal -->
+    <div class="modal fade" id="editGroupModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Group</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-group-id">
+                    <div class="mb-3">
+                        <label for="edit-group-name" class="form-label">Group Name</label>
+                        <input type="text" class="form-control" id="edit-group-name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-group-description" class="form-label">Description</label>
+                        <textarea class="form-control" id="edit-group-description" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="update-group-btn">Update Group</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Group Members Modal -->
+    <div class="modal fade" id="manageGroupMembersModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title">Manage Group Members: <span id="members-group-name"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="members-group-id">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0">Current Members</h6>
+                        <button id="add-member-btn" class="btn btn-sm btn-primary">
+                            <i class="fas fa-plus me-1"></i>Add Member
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Role</th>
+                                    <th>Added</th>
+                                    <th class="text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="group-members-table-body">
+                                <tr>
+                                    <td colspan="4" class="text-center text-body-secondary">Loading members...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Member to Group Modal -->
+    <div class="modal fade" id="addMemberToGroupModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Member to Group</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="select-member-user" class="form-label">Select User</label>
+                        <select class="form-select" id="select-member-user">
+                            <option value="">Loading users...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="save-member-btn">Add Member</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- File Explorer Modal -->
     <div class="modal fade" id="fileExplorerModal" tabindex="-1" aria-labelledby="fileExplorerModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-scrollable">
@@ -208,5 +490,6 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="js/main.js"></script>
     <script src="js/settings.js"></script>
+    <script src="js/admin-panel.js"></script>
 </body>
 </html> 

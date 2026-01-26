@@ -1,10 +1,27 @@
 {
-    "servers_dir": "/path/to/your/MineServerGUI/servers",
-    "configs_dir": "/path/to/your/MineServerGUI/server_configs",
+    "servers_dir": "/mnt/c/Users/bobby/Downloads/Mineservergui/MineServerGUI/servers",
+    "configs_dir": "/mnt/c/Users/bobby/Downloads/Mineservergui/MineServerGUI/server_configs",
     "migrated_scripts_to_config_dir": true,
     "panorama_intensity": 1.05,
     "host": "0.0.0.0",
     "port": 5000,
     "debug": false,
-    "secret_key": "a9dc9bee4a47947d4aa919933feb721fa8770a1827f4450e80c5922ccdc6ad4a"
+    "secret_key": "a9dc9bee4a47947d4aa919933feb721fa8770a1827f4450e80c5922ccdc6ad4a",
+    "multi_user_mode": true,
+    "default_permissions": {
+        "can_view_logs": false,
+        "can_view_analytics": false,
+        "can_start_server": false,
+        "can_stop_server": false,
+        "can_restart_server": false,
+        "can_edit_properties": false,
+        "can_edit_files": false,
+        "can_manage_backups": false,
+        "can_manage_worlds": false,
+        "can_manage_scheduler": false,
+        "can_manage_plugins": false,
+        "can_change_settings": false,
+        "can_access_console": false,
+        "can_delete_server": false
+    }
 }

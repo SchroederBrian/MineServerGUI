@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const API_URL = 'http://127.0.0.1:5000';
 
     // --- Authentication Check ---
+    let currentUser = null;
+    
     async function checkAuthentication() {
         try {
             const response = await fetch(`${API_URL}/api/auth/status`, {
@@ -15,6 +17,31 @@ document.addEventListener('DOMContentLoaded', async () => {
                 window.location.href = 'login.html';
                 return false;
             }
+            
+            // Store user info
+            currentUser = {
+                username: data.username,
+                role: data.role,
+                is_admin: data.is_admin
+            };
+            
+            // Hide/show admin-only features
+            if (!currentUser.is_admin) {
+                // Hide Create Server buttons for non-admins
+                const createServerBtn = document.getElementById('createServerBtn');
+                const createFromTemplateBtn = document.getElementById('createFromTemplateBtn');
+                if (createServerBtn) createServerBtn.style.display = 'none';
+                if (createFromTemplateBtn) createFromTemplateBtn.style.display = 'none';
+                
+                // Hide the entire server creation card
+                const createCard = createServerBtn?.closest('.card');
+                if (createCard) createCard.style.display = 'none';
+                
+                // Hide global Settings button (only admins can change app settings)
+                const settingsBtn = document.getElementById('settingsBtn');
+                if (settingsBtn) settingsBtn.style.display = 'none';
+            }
+            
             return true;
         } catch (error) {
             console.error('Authentication check failed:', error);

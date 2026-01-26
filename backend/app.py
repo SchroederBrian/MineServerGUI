@@ -16,6 +16,7 @@ import sys
 import uuid
 import sqlite3
 import secrets
+from functools import wraps
 from werkzeug.utils import secure_filename
 try:
     import psutil
@@ -82,22 +83,200 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 class User(UserMixin):
-    def __init__(self, id, username):
+    def __init__(self, id, username, role='user', is_active=True):
         self.id = id
         self.username = username
+        self.role = role
+        self._is_active = bool(is_active)
+    
+    @property
+    def is_active(self):
+        return self._is_active
 
 def init_db():
-    """Initialize the user database."""
+    """Initialize the user database with multi-user support."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    
+    # Create users table with role and active status
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'admin',
+            is_active INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Check if migration is needed for existing users table
+    c.execute("PRAGMA table_info(users)")
+    user_columns = {row[1] for row in c.fetchall()}
+    if 'role' not in user_columns:
+        c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
+    if 'is_active' not in user_columns:
+        c.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+    
+    # Set all existing users to admin role
+    c.execute("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''")
+    
+    # Create user groups table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create user-group membership table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_group_memberships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            group_id INTEGER NOT NULL,
+            assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, group_id),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(group_id) REFERENCES user_groups(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Create user server permissions table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_server_permissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            server_name TEXT NOT NULL,
+            can_view INTEGER NOT NULL DEFAULT 0,
+            can_start_stop INTEGER NOT NULL DEFAULT 0,
+            can_edit_config INTEGER NOT NULL DEFAULT 0,
+            can_delete INTEGER NOT NULL DEFAULT 0,
+            can_access_console INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, server_name),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Create group server permissions table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS group_server_permissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            server_name TEXT NOT NULL,
+            can_view INTEGER NOT NULL DEFAULT 0,
+            can_start_stop INTEGER NOT NULL DEFAULT 0,
+            can_edit_config INTEGER NOT NULL DEFAULT 0,
+            can_delete INTEGER NOT NULL DEFAULT 0,
+            can_access_console INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(group_id, server_name),
+            FOREIGN KEY(group_id) REFERENCES user_groups(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # ===== GRANULAR PERMISSIONS MIGRATION =====
+    # Add new granular permission columns to user_server_permissions
+    c.execute("PRAGMA table_info(user_server_permissions)")
+    existing_user_perm_columns = {row[1] for row in c.fetchall()}
+    
+    new_granular_permissions = [
+        'can_view_logs', 'can_view_analytics',
+        'can_start_server', 'can_stop_server', 'can_restart_server',
+        'can_edit_properties', 'can_edit_files',
+        'can_manage_backups', 'can_manage_worlds', 'can_manage_scheduler',
+        'can_manage_plugins', 'can_change_settings', 'can_delete_server'
+    ]
+    
+    for perm in new_granular_permissions:
+        if perm not in existing_user_perm_columns:
+            c.execute(f"ALTER TABLE user_server_permissions ADD COLUMN {perm} INTEGER NOT NULL DEFAULT 0")
+    
+    # Add new granular permission columns to group_server_permissions
+    c.execute("PRAGMA table_info(group_server_permissions)")
+    existing_group_perm_columns = {row[1] for row in c.fetchall()}
+    
+    for perm in new_granular_permissions:
+        if perm not in existing_group_perm_columns:
+            c.execute(f"ALTER TABLE group_server_permissions ADD COLUMN {perm} INTEGER NOT NULL DEFAULT 0")
+    
+    # Migrate old broad permissions to new granular ones for user_server_permissions
+    # Only migrate if old columns exist and new columns are empty
+    if 'can_view' in existing_user_perm_columns:
+        c.execute('''
+            UPDATE user_server_permissions 
+            SET can_view_logs = can_view, can_view_analytics = can_view
+            WHERE can_view = 1 AND can_view_logs = 0
+        ''')
+    
+    if 'can_start_stop' in existing_user_perm_columns:
+        c.execute('''
+            UPDATE user_server_permissions 
+            SET can_start_server = can_start_stop, 
+                can_stop_server = can_start_stop,
+                can_restart_server = can_start_stop
+            WHERE can_start_stop = 1 AND can_start_server = 0
+        ''')
+    
+    if 'can_edit_config' in existing_user_perm_columns:
+        c.execute('''
+            UPDATE user_server_permissions 
+            SET can_edit_properties = can_edit_config,
+                can_edit_files = can_edit_config,
+                can_manage_backups = can_edit_config,
+                can_manage_worlds = can_edit_config,
+                can_manage_scheduler = can_edit_config,
+                can_manage_plugins = can_edit_config,
+                can_change_settings = can_edit_config
+            WHERE can_edit_config = 1 AND can_edit_properties = 0
+        ''')
+    
+    if 'can_delete' in existing_user_perm_columns:
+        c.execute('''
+            UPDATE user_server_permissions 
+            SET can_delete_server = can_delete
+            WHERE can_delete = 1 AND can_delete_server = 0
+        ''')
+    
+    # Migrate for group_server_permissions as well
+    if 'can_view' in existing_group_perm_columns:
+        c.execute('''
+            UPDATE group_server_permissions 
+            SET can_view_logs = can_view, can_view_analytics = can_view
+            WHERE can_view = 1 AND can_view_logs = 0
+        ''')
+    
+    if 'can_start_stop' in existing_group_perm_columns:
+        c.execute('''
+            UPDATE group_server_permissions 
+            SET can_start_server = can_start_stop, 
+                can_stop_server = can_start_stop,
+                can_restart_server = can_start_stop
+            WHERE can_start_stop = 1 AND can_start_server = 0
+        ''')
+    
+    if 'can_edit_config' in existing_group_perm_columns:
+        c.execute('''
+            UPDATE group_server_permissions 
+            SET can_edit_properties = can_edit_config,
+                can_edit_files = can_edit_config,
+                can_manage_backups = can_edit_config,
+                can_manage_worlds = can_edit_config,
+                can_manage_scheduler = can_edit_config,
+                can_manage_plugins = can_edit_config,
+                can_change_settings = can_edit_config
+            WHERE can_edit_config = 1 AND can_edit_properties = 0
+        ''')
+    
+    if 'can_delete' in existing_group_perm_columns:
+        c.execute('''
+            UPDATE group_server_permissions 
+            SET can_delete_server = can_delete
+            WHERE can_delete = 1 AND can_delete_server = 0
+        ''')
+    
     conn.commit()
     conn.close()
 
@@ -105,29 +284,32 @@ def get_user_by_id(user_id):
     """Fetch user by ID."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT id, username FROM users WHERE id = ?', (user_id,))
+    c.execute('SELECT id, username, role, is_active FROM users WHERE id = ?', (user_id,))
     row = c.fetchone()
     conn.close()
     if row:
-        return User(row[0], row[1])
+        return User(row[0], row[1], row[2], row[3])
     return None
 
 def get_user_by_username(username):
     """Fetch user by username."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT id, username, password_hash FROM users WHERE username = ?', (username,))
+    c.execute('SELECT id, username, password_hash, role, is_active FROM users WHERE username = ?', (username,))
     row = c.fetchone()
     conn.close()
     return row
 
-def create_user(username, password):
-    """Create a new user."""
+def create_user(username, password, role='user', is_active=True):
+    """Create a new user with role and active status."""
     password_hash = generate_password_hash(password)
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     try:
-        c.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', (username, password_hash))
+        c.execute(
+            'INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)',
+            (username, password_hash, role, 1 if is_active else 0)
+        )
         conn.commit()
         user_id = c.lastrowid
         conn.close()
@@ -144,6 +326,177 @@ def has_users():
     count = c.fetchone()[0]
     conn.close()
     return count > 0
+
+# --- Permission System ---
+
+def is_admin_user(user):
+    """Check if a user has admin role."""
+    return getattr(user, 'role', None) == 'admin'
+
+def get_default_permissions():
+    """Get default permissions from config."""
+    defaults = config.get('default_permissions', {})
+    return {
+        # Viewing permissions
+        'can_view_logs': bool(defaults.get('can_view_logs', False)),
+        'can_view_analytics': bool(defaults.get('can_view_analytics', False)),
+        # Server control permissions
+        'can_start_server': bool(defaults.get('can_start_server', False)),
+        'can_stop_server': bool(defaults.get('can_stop_server', False)),
+        'can_restart_server': bool(defaults.get('can_restart_server', False)),
+        # Configuration & management permissions
+        'can_edit_properties': bool(defaults.get('can_edit_properties', False)),
+        'can_edit_files': bool(defaults.get('can_edit_files', False)),
+        'can_manage_backups': bool(defaults.get('can_manage_backups', False)),
+        'can_manage_worlds': bool(defaults.get('can_manage_worlds', False)),
+        'can_manage_scheduler': bool(defaults.get('can_manage_scheduler', False)),
+        'can_manage_plugins': bool(defaults.get('can_manage_plugins', False)),
+        'can_change_settings': bool(defaults.get('can_change_settings', False)),
+        # Console permission
+        'can_access_console': bool(defaults.get('can_access_console', False)),
+        # Danger zone permission
+        'can_delete_server': bool(defaults.get('can_delete_server', False)),
+        # Legacy permissions (keep for backwards compatibility)
+        'can_view': bool(defaults.get('can_view', False)),
+        'can_start_stop': bool(defaults.get('can_start_stop', False)),
+        'can_edit_config': bool(defaults.get('can_edit_config', False)),
+        'can_delete': bool(defaults.get('can_delete', False))
+    }
+
+def merge_permissions(base, override):
+    """Merge permissions using OR logic (any true = true)."""
+    for key in base.keys():
+        base[key] = bool(base[key]) or bool(override.get(key, False))
+    return base
+
+def get_user_permissions(user_id, server_name):
+    """Resolve permissions for a user and server, including group permissions."""
+    default_permissions = get_default_permissions()
+    permissions = dict(default_permissions)
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Get direct user permissions for this server (including wildcard '*')
+    c.execute('''
+        SELECT can_view_logs, can_view_analytics,
+               can_start_server, can_stop_server, can_restart_server,
+               can_edit_properties, can_edit_files,
+               can_manage_backups, can_manage_worlds, can_manage_scheduler,
+               can_manage_plugins, can_change_settings,
+               can_access_console, can_delete_server,
+               can_view, can_start_stop, can_edit_config, can_delete
+        FROM user_server_permissions
+        WHERE user_id = ? AND server_name IN (?, '*')
+    ''', (user_id, server_name))
+    
+    for row in c.fetchall():
+        permissions = merge_permissions(permissions, {
+            'can_view_logs': row[0],
+            'can_view_analytics': row[1],
+            'can_start_server': row[2],
+            'can_stop_server': row[3],
+            'can_restart_server': row[4],
+            'can_edit_properties': row[5],
+            'can_edit_files': row[6],
+            'can_manage_backups': row[7],
+            'can_manage_worlds': row[8],
+            'can_manage_scheduler': row[9],
+            'can_manage_plugins': row[10],
+            'can_change_settings': row[11],
+            'can_access_console': row[12],
+            'can_delete_server': row[13],
+            'can_view': row[14],
+            'can_start_stop': row[15],
+            'can_edit_config': row[16],
+            'can_delete': row[17]
+        })
+    
+    # Get user's group memberships
+    c.execute('SELECT group_id FROM user_group_memberships WHERE user_id = ?', (user_id,))
+    group_ids = [row[0] for row in c.fetchall()]
+    
+    # Get group permissions
+    if group_ids:
+        placeholders = ','.join('?' for _ in group_ids)
+        query = f'''
+            SELECT can_view_logs, can_view_analytics,
+                   can_start_server, can_stop_server, can_restart_server,
+                   can_edit_properties, can_edit_files,
+                   can_manage_backups, can_manage_worlds, can_manage_scheduler,
+                   can_manage_plugins, can_change_settings,
+                   can_access_console, can_delete_server,
+                   can_view, can_start_stop, can_edit_config, can_delete
+            FROM group_server_permissions
+            WHERE group_id IN ({placeholders}) AND server_name IN (?, '*')
+        '''
+        c.execute(query, (*group_ids, server_name))
+        
+        for row in c.fetchall():
+            permissions = merge_permissions(permissions, {
+                'can_view_logs': row[0],
+                'can_view_analytics': row[1],
+                'can_start_server': row[2],
+                'can_stop_server': row[3],
+                'can_restart_server': row[4],
+                'can_edit_properties': row[5],
+                'can_edit_files': row[6],
+                'can_manage_backups': row[7],
+                'can_manage_worlds': row[8],
+                'can_manage_scheduler': row[9],
+                'can_manage_plugins': row[10],
+                'can_change_settings': row[11],
+                'can_access_console': row[12],
+                'can_delete_server': row[13],
+                'can_view': row[14],
+                'can_start_stop': row[15],
+                'can_edit_config': row[16],
+                'can_delete': row[17]
+            })
+    
+    conn.close()
+    return permissions
+
+def require_admin(func):
+    """Decorator to require admin role."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required'}), 401
+        if not is_admin_user(current_user):
+            return jsonify({'error': 'Admin access required'}), 403
+        return func(*args, **kwargs)
+    return wrapper
+
+def require_permission(permission_key, server_name_arg='server_name'):
+    """Decorator to require specific permission for a server."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return jsonify({'error': 'Authentication required'}), 401
+            
+            # Admins bypass permission checks
+            if is_admin_user(current_user):
+                return func(*args, **kwargs)
+            
+            # Get server name from route arguments
+            server_name = kwargs.get(server_name_arg)
+            if not server_name:
+                return jsonify({'error': 'Server name required'}), 400
+            
+            # Check permissions
+            permissions = get_user_permissions(current_user.id, server_name)
+            if not permissions.get(permission_key, False):
+                return jsonify({'error': 'Insufficient permissions'}), 403
+            
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def is_valid_server_name(server_name):
+    """Validate server name to prevent directory traversal."""
+    return bool(server_name) and '..' not in server_name and '/' not in server_name and '\\' not in server_name
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -288,7 +641,8 @@ def setup():
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters long'}), 400
     
-    user_id = create_user(username, password)
+    # First user is always an admin
+    user_id = create_user(username, password, role='admin', is_active=True)
     if user_id is None:
         return jsonify({'error': 'Failed to create user'}), 500
     
@@ -308,17 +662,22 @@ def login():
     if not user_row:
         return jsonify({'error': 'Invalid username or password'}), 401
     
-    user_id, stored_username, password_hash = user_row
+    user_id, stored_username, password_hash, role, is_active = user_row
+    
+    # Check if account is active
+    if not is_active:
+        return jsonify({'error': 'User account is disabled'}), 403
     
     if not check_password_hash(password_hash, password):
         return jsonify({'error': 'Invalid username or password'}), 401
     
-    user = User(user_id, stored_username)
+    user = User(user_id, stored_username, role, is_active)
     login_user(user)
     
     return jsonify({
         'message': 'Login successful',
-        'username': stored_username
+        'username': stored_username,
+        'role': role
     }), 200
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -334,9 +693,550 @@ def auth_status():
     if current_user.is_authenticated:
         return jsonify({
             'authenticated': True,
-            'username': current_user.username
+            'username': current_user.username,
+            'role': getattr(current_user, 'role', 'user'),
+            'is_admin': is_admin_user(current_user)
         }), 200
     return jsonify({'authenticated': False}), 200
+
+
+# --- Admin API Endpoints ---
+
+@app.route('/api/admin/users', methods=['GET'])
+@login_required
+@require_admin
+def list_users():
+    """List all users (admin only)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT id, username, role, is_active, created_at FROM users ORDER BY username')
+    rows = c.fetchall()
+    conn.close()
+    
+    users = [{
+        'id': row[0],
+        'username': row[1],
+        'role': row[2],
+        'is_active': bool(row[3]),
+        'created_at': row[4]
+    } for row in rows]
+    
+    return jsonify({'users': users}), 200
+
+@app.route('/api/admin/users', methods=['POST'])
+@login_required
+@require_admin
+def create_user_admin():
+    """Create a new user (admin only)."""
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    role = data.get('role', 'user')
+    
+    if role not in ['admin', 'user']:
+        return jsonify({'error': 'Invalid role. Must be admin or user'}), 400
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters long'}), 400
+    
+    user_id = create_user(username, password, role=role, is_active=True)
+    if user_id is None:
+        return jsonify({'error': 'Username already exists'}), 409
+    
+    return jsonify({'id': user_id, 'username': username, 'role': role}), 201
+
+@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+@login_required
+@require_admin
+def update_user_admin(user_id):
+    """Update user (admin only)."""
+    data = request.get_json() or {}
+    role = data.get('role')
+    password = data.get('password')
+    is_active = data.get('is_active')
+    
+    updates = []
+    params = []
+    
+    if role is not None:
+        if role not in ['admin', 'user']:
+            return jsonify({'error': 'Invalid role'}), 400
+        updates.append('role = ?')
+        params.append(role)
+    
+    if password:
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters long'}), 400
+        updates.append('password_hash = ?')
+        params.append(generate_password_hash(password))
+    
+    if is_active is not None:
+        updates.append('is_active = ?')
+        params.append(1 if is_active else 0)
+    
+    if not updates:
+        return jsonify({'error': 'No updates provided'}), 400
+    
+    params.append(user_id)
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(f'UPDATE users SET {", ".join(updates)} WHERE id = ?', params)
+    conn.commit()
+    updated = c.rowcount
+    conn.close()
+    
+    if updated == 0:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'message': 'User updated successfully'}), 200
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@login_required
+@require_admin
+def delete_user_admin(user_id):
+    """Delete user (admin only)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('DELETE FROM user_group_memberships WHERE user_id = ?', (user_id,))
+    c.execute('DELETE FROM user_server_permissions WHERE user_id = ?', (user_id,))
+    c.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    conn.commit()
+    deleted = c.rowcount
+    conn.close()
+    
+    if deleted == 0:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'message': 'User deleted successfully'}), 200
+
+@app.route('/api/admin/groups', methods=['GET'])
+@login_required
+@require_admin
+def list_groups():
+    """List all groups (admin only)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT id, name, description, created_at FROM user_groups ORDER BY name')
+    groups = []
+    
+    for row in c.fetchall():
+        group_id = row[0]
+        c.execute('SELECT COUNT(*) FROM user_group_memberships WHERE group_id = ?', (group_id,))
+        member_count = c.fetchone()[0]
+        groups.append({
+            'id': group_id,
+            'name': row[1],
+            'description': row[2],
+            'created_at': row[3],
+            'member_count': member_count
+        })
+    
+    conn.close()
+    return jsonify({'groups': groups}), 200
+
+@app.route('/api/admin/groups', methods=['POST'])
+@login_required
+@require_admin
+def create_group():
+    """Create a new group (admin only)."""
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    description = data.get('description', '').strip()
+    
+    if not name:
+        return jsonify({'error': 'Group name is required'}), 400
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO user_groups (name, description) VALUES (?, ?)', (name, description))
+        conn.commit()
+        group_id = c.lastrowid
+        conn.close()
+        return jsonify({'id': group_id, 'name': name, 'description': description}), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Group name already exists'}), 409
+
+@app.route('/api/admin/groups/<int:group_id>', methods=['PUT'])
+@login_required
+@require_admin
+def update_group(group_id):
+    """Update group (admin only)."""
+    data = request.get_json() or {}
+    name = data.get('name')
+    description = data.get('description')
+    
+    updates = []
+    params = []
+    
+    if name is not None:
+        if not name.strip():
+            return jsonify({'error': 'Group name cannot be empty'}), 400
+        updates.append('name = ?')
+        params.append(name.strip())
+    
+    if description is not None:
+        updates.append('description = ?')
+        params.append(description.strip())
+    
+    if not updates:
+        return jsonify({'error': 'No updates provided'}), 400
+    
+    params.append(group_id)
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute(f'UPDATE user_groups SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+        updated = c.rowcount
+        conn.close()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Group name already exists'}), 409
+    
+    if updated == 0:
+        return jsonify({'error': 'Group not found'}), 404
+    return jsonify({'message': 'Group updated successfully'}), 200
+
+@app.route('/api/admin/groups/<int:group_id>', methods=['DELETE'])
+@login_required
+@require_admin
+def delete_group(group_id):
+    """Delete group (admin only)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('DELETE FROM user_group_memberships WHERE group_id = ?', (group_id,))
+    c.execute('DELETE FROM group_server_permissions WHERE group_id = ?', (group_id,))
+    c.execute('DELETE FROM user_groups WHERE id = ?', (group_id,))
+    conn.commit()
+    deleted = c.rowcount
+    conn.close()
+    
+    if deleted == 0:
+        return jsonify({'error': 'Group not found'}), 404
+    return jsonify({'message': 'Group deleted successfully'}), 200
+
+@app.route('/api/admin/groups/<int:group_id>/members', methods=['GET'])
+@login_required
+@require_admin
+def list_group_members(group_id):
+    """List members of a group (admin only)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        SELECT u.id, u.username, u.role, ugm.assigned_at
+        FROM user_group_memberships ugm
+        JOIN users u ON u.id = ugm.user_id
+        WHERE ugm.group_id = ?
+        ORDER BY u.username
+    ''', (group_id,))
+    
+    members = [{
+        'id': row[0],
+        'username': row[1],
+        'role': row[2],
+        'assigned_at': row[3]
+    } for row in c.fetchall()]
+    
+    conn.close()
+    return jsonify({'members': members}), 200
+
+@app.route('/api/admin/groups/<int:group_id>/members', methods=['POST'])
+@login_required
+@require_admin
+def add_group_member(group_id):
+    """Add user to group (admin only)."""
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO user_group_memberships (user_id, group_id) VALUES (?, ?)', (user_id, group_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'User added to group successfully'}), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'User already in group or invalid IDs'}), 409
+
+@app.route('/api/admin/groups/<int:group_id>/members/<int:user_id>', methods=['DELETE'])
+@login_required
+@require_admin
+def remove_group_member(group_id, user_id):
+    """Remove user from group (admin only)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('DELETE FROM user_group_memberships WHERE group_id = ? AND user_id = ?', (group_id, user_id))
+    conn.commit()
+    deleted = c.rowcount
+    conn.close()
+    
+    if deleted == 0:
+        return jsonify({'error': 'Member not found in group'}), 404
+    return jsonify({'message': 'User removed from group successfully'}), 200
+
+@app.route('/api/admin/servers/<server_name>/permissions', methods=['GET'])
+@login_required
+@require_admin
+def get_server_permissions(server_name):
+    """Get all permissions for a server (admin only)."""
+    if not is_valid_server_name(server_name):
+        return jsonify({'error': 'Invalid server name'}), 400
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Get user permissions
+    c.execute('''
+        SELECT usp.user_id, u.username,
+               usp.can_view_logs, usp.can_view_analytics,
+               usp.can_start_server, usp.can_stop_server, usp.can_restart_server,
+               usp.can_edit_properties, usp.can_edit_files,
+               usp.can_manage_backups, usp.can_manage_worlds, usp.can_manage_scheduler,
+               usp.can_manage_plugins, usp.can_change_settings,
+               usp.can_access_console, usp.can_delete_server
+        FROM user_server_permissions usp
+        JOIN users u ON u.id = usp.user_id
+        WHERE usp.server_name = ?
+        ORDER BY u.username
+    ''', (server_name,))
+    
+    user_permissions = [{
+        'user_id': row[0],
+        'username': row[1],
+        'can_view_logs': bool(row[2]),
+        'can_view_analytics': bool(row[3]),
+        'can_start_server': bool(row[4]),
+        'can_stop_server': bool(row[5]),
+        'can_restart_server': bool(row[6]),
+        'can_edit_properties': bool(row[7]),
+        'can_edit_files': bool(row[8]),
+        'can_manage_backups': bool(row[9]),
+        'can_manage_worlds': bool(row[10]),
+        'can_manage_scheduler': bool(row[11]),
+        'can_manage_plugins': bool(row[12]),
+        'can_change_settings': bool(row[13]),
+        'can_access_console': bool(row[14]),
+        'can_delete_server': bool(row[15])
+    } for row in c.fetchall()]
+    
+    # Get group permissions
+    c.execute('''
+        SELECT gsp.group_id, ug.name,
+               gsp.can_view_logs, gsp.can_view_analytics,
+               gsp.can_start_server, gsp.can_stop_server, gsp.can_restart_server,
+               gsp.can_edit_properties, gsp.can_edit_files,
+               gsp.can_manage_backups, gsp.can_manage_worlds, gsp.can_manage_scheduler,
+               gsp.can_manage_plugins, gsp.can_change_settings,
+               gsp.can_access_console, gsp.can_delete_server
+        FROM group_server_permissions gsp
+        JOIN user_groups ug ON ug.id = gsp.group_id
+        WHERE gsp.server_name = ?
+        ORDER BY ug.name
+    ''', (server_name,))
+    
+    group_permissions = [{
+        'group_id': row[0],
+        'name': row[1],
+        'can_view_logs': bool(row[2]),
+        'can_view_analytics': bool(row[3]),
+        'can_start_server': bool(row[4]),
+        'can_stop_server': bool(row[5]),
+        'can_restart_server': bool(row[6]),
+        'can_edit_properties': bool(row[7]),
+        'can_edit_files': bool(row[8]),
+        'can_manage_backups': bool(row[9]),
+        'can_manage_worlds': bool(row[10]),
+        'can_manage_scheduler': bool(row[11]),
+        'can_manage_plugins': bool(row[12]),
+        'can_change_settings': bool(row[13]),
+        'can_access_console': bool(row[14]),
+        'can_delete_server': bool(row[15])
+    } for row in c.fetchall()]
+    
+    conn.close()
+    return jsonify({
+        'server_name': server_name,
+        'user_permissions': user_permissions,
+        'group_permissions': group_permissions
+    }), 200
+
+@app.route('/api/admin/servers/<server_name>/permissions/users/<int:user_id>', methods=['PUT'])
+@login_required
+@require_admin
+def set_user_permissions(server_name, user_id):
+    """Set user permissions for a server (admin only)."""
+    if not is_valid_server_name(server_name):
+        return jsonify({'error': 'Invalid server name'}), 400
+    
+    data = request.get_json() or {}
+    
+    # Granular permissions
+    values = (
+        1 if data.get('can_view_logs') else 0,
+        1 if data.get('can_view_analytics') else 0,
+        1 if data.get('can_start_server') else 0,
+        1 if data.get('can_stop_server') else 0,
+        1 if data.get('can_restart_server') else 0,
+        1 if data.get('can_edit_properties') else 0,
+        1 if data.get('can_edit_files') else 0,
+        1 if data.get('can_manage_backups') else 0,
+        1 if data.get('can_manage_worlds') else 0,
+        1 if data.get('can_manage_scheduler') else 0,
+        1 if data.get('can_manage_plugins') else 0,
+        1 if data.get('can_change_settings') else 0,
+        1 if data.get('can_access_console') else 0,
+        1 if data.get('can_delete_server') else 0
+    )
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO user_server_permissions (
+            user_id, server_name,
+            can_view_logs, can_view_analytics,
+            can_start_server, can_stop_server, can_restart_server,
+            can_edit_properties, can_edit_files,
+            can_manage_backups, can_manage_worlds, can_manage_scheduler,
+            can_manage_plugins, can_change_settings,
+            can_access_console, can_delete_server
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, server_name) DO UPDATE SET
+            can_view_logs = excluded.can_view_logs,
+            can_view_analytics = excluded.can_view_analytics,
+            can_start_server = excluded.can_start_server,
+            can_stop_server = excluded.can_stop_server,
+            can_restart_server = excluded.can_restart_server,
+            can_edit_properties = excluded.can_edit_properties,
+            can_edit_files = excluded.can_edit_files,
+            can_manage_backups = excluded.can_manage_backups,
+            can_manage_worlds = excluded.can_manage_worlds,
+            can_manage_scheduler = excluded.can_manage_scheduler,
+            can_manage_plugins = excluded.can_manage_plugins,
+            can_change_settings = excluded.can_change_settings,
+            can_access_console = excluded.can_access_console,
+            can_delete_server = excluded.can_delete_server
+    ''', (user_id, server_name, *values))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': 'User permissions updated successfully'}), 200
+
+@app.route('/api/admin/servers/<server_name>/permissions/groups/<int:group_id>', methods=['PUT'])
+@login_required
+@require_admin
+def set_group_permissions(server_name, group_id):
+    """Set group permissions for a server (admin only)."""
+    if not is_valid_server_name(server_name):
+        return jsonify({'error': 'Invalid server name'}), 400
+    
+    data = request.get_json() or {}
+    
+    # Granular permissions
+    values = (
+        1 if data.get('can_view_logs') else 0,
+        1 if data.get('can_view_analytics') else 0,
+        1 if data.get('can_start_server') else 0,
+        1 if data.get('can_stop_server') else 0,
+        1 if data.get('can_restart_server') else 0,
+        1 if data.get('can_edit_properties') else 0,
+        1 if data.get('can_edit_files') else 0,
+        1 if data.get('can_manage_backups') else 0,
+        1 if data.get('can_manage_worlds') else 0,
+        1 if data.get('can_manage_scheduler') else 0,
+        1 if data.get('can_manage_plugins') else 0,
+        1 if data.get('can_change_settings') else 0,
+        1 if data.get('can_access_console') else 0,
+        1 if data.get('can_delete_server') else 0
+    )
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO group_server_permissions (
+            group_id, server_name,
+            can_view_logs, can_view_analytics,
+            can_start_server, can_stop_server, can_restart_server,
+            can_edit_properties, can_edit_files,
+            can_manage_backups, can_manage_worlds, can_manage_scheduler,
+            can_manage_plugins, can_change_settings,
+            can_access_console, can_delete_server
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(group_id, server_name) DO UPDATE SET
+            can_view_logs = excluded.can_view_logs,
+            can_view_analytics = excluded.can_view_analytics,
+            can_start_server = excluded.can_start_server,
+            can_stop_server = excluded.can_stop_server,
+            can_restart_server = excluded.can_restart_server,
+            can_edit_properties = excluded.can_edit_properties,
+            can_edit_files = excluded.can_edit_files,
+            can_manage_backups = excluded.can_manage_backups,
+            can_manage_worlds = excluded.can_manage_worlds,
+            can_manage_scheduler = excluded.can_manage_scheduler,
+            can_manage_plugins = excluded.can_manage_plugins,
+            can_change_settings = excluded.can_change_settings,
+            can_access_console = excluded.can_access_console,
+            can_delete_server = excluded.can_delete_server
+    ''', (group_id, server_name, *values))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': 'Group permissions updated successfully'}), 200
+
+@app.route('/api/admin/servers/<server_name>/permissions/users/<int:user_id>', methods=['DELETE'])
+@login_required
+@require_admin
+def delete_user_permissions(server_name, user_id):
+    """Remove user permissions for a server (admin only)."""
+    if not is_valid_server_name(server_name):
+        return jsonify({'error': 'Invalid server name'}), 400
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('DELETE FROM user_server_permissions WHERE user_id = ? AND server_name = ?', (user_id, server_name))
+    conn.commit()
+    deleted = c.rowcount
+    conn.close()
+    
+    if deleted == 0:
+        return jsonify({'error': 'Permission entry not found'}), 404
+    return jsonify({'message': 'User permissions removed successfully'}), 200
+
+@app.route('/api/user/permissions/<server_name>', methods=['GET'])
+@login_required
+def get_current_user_permissions(server_name):
+    """Get current user's permissions for a server."""
+    if not is_valid_server_name(server_name):
+        return jsonify({'error': 'Invalid server name'}), 400
+    
+    if is_admin_user(current_user):
+        # Admins have all permissions
+        permissions = {
+            'can_view_logs': True,
+            'can_view_analytics': True,
+            'can_start_server': True,
+            'can_stop_server': True,
+            'can_restart_server': True,
+            'can_edit_properties': True,
+            'can_edit_files': True,
+            'can_manage_backups': True,
+            'can_manage_worlds': True,
+            'can_manage_scheduler': True,
+            'can_manage_plugins': True,
+            'can_change_settings': True,
+            'can_access_console': True,
+            'can_delete_server': True
+        }
+    else:
+        permissions = get_user_permissions(current_user.id, server_name)
+    
+    return jsonify(permissions), 200
 
 
 # --- API Endpoints ---
@@ -346,8 +1246,19 @@ def auth_status():
 def get_server_details(server_name):
     """Gets all details for a single server."""
     # Basic sanitization for the server name itself
-    if '..' in server_name or '/' in server_name or '\\' in server_name:
+    if not is_valid_server_name(server_name):
         return jsonify({"error": "Invalid server name format"}), 400
+    
+    # Allow access if user is admin OR has any viewing permission (old or new)
+    if not is_admin_user(current_user):
+        permissions = get_user_permissions(current_user.id, server_name)
+        has_any_view_permission = (
+            permissions.get('can_view_logs', False) or 
+            permissions.get('can_view_analytics', False) or
+            permissions.get('can_view', False)
+        )
+        if not has_any_view_permission:
+            return jsonify({'error': 'You do not have permission to view this server'}), 403
 
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -371,6 +1282,7 @@ def get_server_details(server_name):
 
 @app.route('/api/servers/<server_name>/port', methods=['POST'])
 @login_required
+@require_permission('can_edit_config')
 def update_server_port(server_name):
     """Updates the server port in the server.properties file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -424,6 +1336,10 @@ def update_server_port(server_name):
 def handle_servers():
     """Handles getting the server list and creating new servers."""
     if request.method == 'POST':
+        # Only admins can create servers
+        if not is_admin_user(current_user):
+            return jsonify({'error': 'Admin access required to create servers'}), 403
+        
         data = request.get_json()
         server_name = data.get('server_name')
         version = data.get('version')
@@ -485,16 +1401,27 @@ def handle_servers():
     for server_name in os.listdir(SERVERS_DIR):
         server_path = os.path.join(SERVERS_DIR, server_name)
         if os.path.isdir(server_path):
-            properties = get_server_properties(server_path)
-            metadata = get_server_metadata(server_path)
-            servers.append({
-                'id': server_name,
-                'name': server_name,
-                'version': metadata.get('version', 'N/A'),
-                'port': properties.get('port'),
-                'server_type': metadata.get('server_type', 'N/A'),
-                'status': 'Running' if is_server_running(server_name) else 'Stopped'
-            })
+            # Filter servers based on permissions (admins see all)
+            if is_admin_user(current_user):
+                has_access = True
+            else:
+                permissions = get_user_permissions(current_user.id, server_name)
+                # User needs at least one viewing permission to see the server
+                has_access = (permissions.get('can_view_logs', False) or 
+                            permissions.get('can_view_analytics', False) or
+                            permissions.get('can_view', False))
+            
+            if has_access:
+                properties = get_server_properties(server_path)
+                metadata = get_server_metadata(server_path)
+                servers.append({
+                    'id': server_name,
+                    'name': server_name,
+                    'version': metadata.get('version', 'N/A'),
+                    'port': properties.get('port'),
+                    'server_type': metadata.get('server_type', 'N/A'),
+                    'status': 'Running' if is_server_running(server_name) else 'Stopped'
+                })
     return jsonify(servers)
 
 
@@ -502,6 +1429,22 @@ def handle_servers():
 @login_required
 def server_action(server_name, action):
     """Handles start, stop, and restart actions for a server."""
+    # Check granular permissions based on specific action
+    if not is_admin_user(current_user):
+        permissions = get_user_permissions(current_user.id, server_name)
+        
+        if action == 'start':
+            if not (permissions.get('can_start_server', False) or permissions.get('can_start_stop', False)):
+                return jsonify({'error': 'You do not have permission to start this server'}), 403
+        elif action == 'stop':
+            if not (permissions.get('can_stop_server', False) or permissions.get('can_start_stop', False)):
+                return jsonify({'error': 'You do not have permission to stop this server'}), 403
+        elif action == 'restart':
+            if not (permissions.get('can_restart_server', False) or permissions.get('can_start_stop', False)):
+                return jsonify({'error': 'You do not have permission to restart this server'}), 403
+        else:
+            return jsonify({'error': 'Invalid action specified'}), 400
+    
     if action == 'start':
         result, status_code = start_server(server_name)
         return jsonify(result), status_code
@@ -519,6 +1462,7 @@ def server_action(server_name, action):
 
 @app.route('/api/servers/<server_name>/clear-logs', methods=['POST'])
 @login_required
+@require_permission('can_edit_config')
 def clear_logs(server_name):
     """Clears the server's log file and resets the log counter."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -803,6 +1747,7 @@ def get_server_status(server_name):
 
 @app.route('/api/servers/<server_name>/console', methods=['GET', 'POST'])
 @login_required
+@require_permission('can_access_console')
 def handle_console(server_name):
     """
     Handles getting console output and sending commands via screen.
@@ -846,8 +1791,8 @@ def get_server_log(server_name):
     server_path = os.path.join(SERVERS_DIR, server_name)
     log_file_path = os.path.join(server_path, 'logs', 'latest.log')
 
-    if not os.path.exists(log_file_path):
-        return jsonify({"lines": ["Log file not found. It will be created when the server starts."], "line_count": 1})
+    #if not os.path.exists(log_file_path):
+    #    return jsonify({"lines": ["Log file not found. It will be created when the server starts."], "line_count": 1})
 
     try:
         with open(log_file_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -1060,6 +2005,7 @@ def install_java(server_name):
 
 @app.route('/api/servers/<server_name>', methods=['DELETE'])
 @login_required
+@require_permission('can_delete')
 def delete_server(server_name):
     """Deletes a server after stopping it."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1633,6 +2579,7 @@ def parse_properties(file_path):
 
 @app.route('/api/servers/<server_name>/properties', methods=['GET'])
 @login_required
+@require_permission('can_view')
 def get_server_properties_endpoint(server_name):
     """Gets the full server.properties file as a JSON object."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -1648,6 +2595,7 @@ def get_server_properties_endpoint(server_name):
 
 @app.route('/api/servers/<server_name>/properties', methods=['POST'])
 @login_required
+@require_permission('can_edit_config')
 def save_server_properties_endpoint(server_name):
     """Updates the server.properties file from a JSON object."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2498,6 +3446,7 @@ def supports_plugins_or_mods(server_name):
 
 @app.route('/api/servers/<server_name>/plugins', methods=['GET'])
 @login_required
+@require_permission('can_manage_plugins', 'server_name')
 def list_plugins(server_name):
     """Lists all installed plugins/mods for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2528,6 +3477,7 @@ def list_plugins(server_name):
 
 @app.route('/api/servers/<server_name>/plugins/search', methods=['GET'])
 @login_required
+@require_permission('can_manage_plugins', 'server_name')
 def search_plugins(server_name):
     """Search for plugins/mods from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2590,6 +3540,7 @@ def search_plugins(server_name):
 
 @app.route('/api/servers/<server_name>/plugins/install', methods=['POST'])
 @login_required
+@require_permission('can_manage_plugins', 'server_name')
 def install_plugin(server_name):
     """Install a plugin/mod from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2675,6 +3626,7 @@ def install_plugin(server_name):
 
 @app.route('/api/servers/<server_name>/plugins/<path:filename>', methods=['DELETE'])
 @login_required
+@require_permission('can_manage_plugins', 'server_name')
 def delete_plugin(server_name, filename):
     """Delete a plugin/mod file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
@@ -2705,6 +3657,7 @@ def delete_plugin(server_name, filename):
 
 @app.route('/api/servers/<server_name>/plugins/info/<project_id>', methods=['GET'])
 @login_required
+@require_permission('can_manage_plugins', 'server_name')
 def get_plugin_info(server_name, project_id):
     """Get detailed information about a plugin from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)

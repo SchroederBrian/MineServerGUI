@@ -97,8 +97,8 @@ Ready to take control? Follow these simple steps to get MineServerGUI up and run
     cd backend
     
     # (Recommended) Create and activate a virtual environment
-    python -m venv venv
-    source venv/bin/activate
+    python -m venv .venv
+    source .venv/bin/activate
     
     # Install dependencies
     pip install -r requirements.txt

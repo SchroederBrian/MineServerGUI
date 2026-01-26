@@ -12,6 +12,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     };
 
     // --- Authentication Check ---
+    let currentUser = null;
+    let userPermissions = null;
+    
     async function checkAuthentication() {
         try {
             const response = await authenticatedFetch(`${API_URL}/api/auth/status`);
@@ -21,11 +24,168 @@ document.addEventListener('DOMContentLoaded', async function () {
                 window.location.href = 'login.html';
                 return false;
             }
+            
+            // Store user info
+            currentUser = {
+                username: data.username,
+                role: data.role,
+                is_admin: data.is_admin
+            };
+            
             return true;
         } catch (error) {
             console.error('Authentication check failed:', error);
             window.location.href = 'login.html';
             return false;
+        }
+    }
+    
+    async function loadUserPermissions() {
+        try {
+            const response = await authenticatedFetch(`${API_URL}/api/user/permissions/${serverId}`);
+            userPermissions = await response.json();
+        } catch (error) {
+            console.error('Error loading permissions:', error);
+        }
+    }
+    
+    function activateFirstAllowedTab() {
+        // Find the first visible tab and activate it
+        const tabButtons = document.querySelectorAll('#myTab .nav-link');
+        const tabPanes = document.querySelectorAll('#myTabContent .tab-pane');
+        
+        // First, deactivate all tabs
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        tabPanes.forEach(pane => pane.classList.remove('show', 'active'));
+        
+        // Find and activate the first visible tab
+        for (let i = 0; i < tabButtons.length; i++) {
+            const button = tabButtons[i];
+            const parentLi = button.parentElement;
+            
+            // Check if tab is visible (not hidden by permissions)
+            if (parentLi && parentLi.style.display !== 'none' && button.style.display !== 'none') {
+                // Activate this tab
+                button.classList.add('active');
+                
+                // Find and activate corresponding pane
+                const targetPaneId = button.getAttribute('data-bs-target');
+                if (targetPaneId) {
+                    const targetPane = document.querySelector(targetPaneId);
+                    if (targetPane) {
+                        targetPane.classList.add('show', 'active');
+                    }
+                }
+                
+                console.log(`[TAB] Auto-selected first allowed tab: ${button.textContent.trim()}`);
+                break;
+            }
+        }
+    }
+    
+    function applyPermissionRestrictions() {
+        if (!userPermissions) {
+            console.error('Cannot apply restrictions: permissions not loaded');
+            return;
+        }
+        
+        if (currentUser.is_admin) {
+            // Admins have full access - show everything
+            return;
+        }
+        
+        // ===== GRANULAR PERMISSION ENFORCEMENT =====
+        
+        // --- Viewing Permissions ---
+        if (!userPermissions.can_view_logs) {
+            const logsTabNav = document.querySelector('#logs-tab').parentElement;
+            if (logsTabNav) logsTabNav.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_view_analytics) {
+            const analyticsTabNav = document.querySelector('#analytics-tab').parentElement;
+            if (analyticsTabNav) analyticsTabNav.style.display = 'none';
+        }
+        
+        // --- Server Control Permissions ---
+        if (!userPermissions.can_start_server) {
+            if (startBtn) startBtn.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_stop_server) {
+            if (stopBtn) stopBtn.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_restart_server) {
+            if (restartBtn) restartBtn.style.display = 'none';
+        }
+        
+        // Hide entire control footer if user has no server control permissions
+        if (!userPermissions.can_start_server && !userPermissions.can_stop_server && !userPermissions.can_restart_server) {
+            const controlFooter = document.querySelector('.card-footer.bg-dark-tertiary');
+            if (controlFooter) controlFooter.style.display = 'none';
+        }
+        
+        // --- Configuration & Management Permissions ---
+        if (!userPermissions.can_edit_properties) {
+            const propertiesTabNav = document.querySelector('#properties-tab').parentElement;
+            if (propertiesTabNav) propertiesTabNav.style.display = 'none';
+            
+            const savePropertiesBtn = document.getElementById('save-properties-btn');
+            if (savePropertiesBtn) savePropertiesBtn.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_edit_files) {
+            const filesTabNav = document.querySelector('#files-tab').parentElement;
+            if (filesTabNav) filesTabNav.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_manage_backups) {
+            const backupsTabNav = document.querySelector('#backups-tab').parentElement;
+            if (backupsTabNav) backupsTabNav.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_manage_worlds) {
+            const worldsTabNav = document.querySelector('#worlds-tab').parentElement;
+            if (worldsTabNav) worldsTabNav.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_manage_scheduler) {
+            const schedulerTabNav = document.querySelector('#scheduler-tab').parentElement;
+            if (schedulerTabNav) schedulerTabNav.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_manage_plugins) {
+            const pluginsTabNav = document.getElementById('plugins-tab-nav');
+            if (pluginsTabNav) pluginsTabNav.style.display = 'none';
+        }
+        
+        if (!userPermissions.can_change_settings) {
+            const settingsTabNav = document.querySelector('#settings-tab').parentElement;
+            if (settingsTabNav) settingsTabNav.style.display = 'none';
+            
+            // Hide port edit button
+            if (editPortBtn) editPortBtn.style.display = 'none';
+            
+            // Hide clear logs button
+            if (clearLogsBtn) clearLogsBtn.style.display = 'none';
+        }
+        
+        // --- Console Permission ---
+        if (!userPermissions.can_access_console) {
+            const consoleTabNav = document.querySelector('#console-tab').parentElement;
+            if (consoleTabNav) consoleTabNav.style.display = 'none';
+            
+            if (consoleInputEl) consoleInputEl.style.display = 'none';
+            
+            const saveCommandBtn = document.getElementById('save-command-btn');
+            if (saveCommandBtn) saveCommandBtn.style.display = 'none';
+        }
+        
+        // --- Danger Zone Permission ---
+        if (!userPermissions.can_delete_server) {
+            const deleteServerBtn = document.getElementById('delete-server-btn');
+            if (deleteServerBtn) deleteServerBtn.style.display = 'none';
         }
     }
     
@@ -190,6 +350,13 @@ document.addEventListener('DOMContentLoaded', async function () {
     let isLogAutoscrollEnabled = true;
     let currentServerState = {};
     let pollingInterval;
+
+    // Load user permissions and apply restrictions AFTER DOM elements are defined
+    await loadUserPermissions();
+    if (userPermissions) {
+        applyPermissionRestrictions();
+        activateFirstAllowedTab();
+    }
 
     // --- Unified Polling & State Management ---
 
@@ -2574,19 +2741,24 @@ document.addEventListener('DOMContentLoaded', async function () {
             
             const data = await response.json();
             if (data.supports) {
-                pluginsTabNav.style.display = 'block';
-                currentServerType = data.server_type;
-                folderType = data.folder_type;
-                
-                // Update UI labels based on folder type
-                if (folderType === 'mods') {
-                    pluginManagerTitle.textContent = 'Mod Manager';
-                    installedPluginType.textContent = 'Mods';
-                    pluginSearchInput.placeholder = 'Search for mods...';
+                // Only show tab if user has permission (or is admin)
+                if (currentUser.is_admin || (userPermissions && userPermissions.can_manage_plugins)) {
+                    pluginsTabNav.style.display = 'block';
+                    currentServerType = data.server_type;
+                    folderType = data.folder_type;
+                    
+                    // Update UI labels based on folder type
+                    if (folderType === 'mods') {
+                        pluginManagerTitle.textContent = 'Mod Manager';
+                        installedPluginType.textContent = 'Mods';
+                        pluginSearchInput.placeholder = 'Search for mods...';
+                    } else {
+                        pluginManagerTitle.textContent = 'Plugin Manager';
+                        installedPluginType.textContent = 'Plugins';
+                        pluginSearchInput.placeholder = 'Search for plugins...';
+                    }
                 } else {
-                    pluginManagerTitle.textContent = 'Plugin Manager';
-                    installedPluginType.textContent = 'Plugins';
-                    pluginSearchInput.placeholder = 'Search for plugins...';
+                    pluginsTabNav.style.display = 'none';
                 }
             } else {
                 pluginsTabNav.style.display = 'none';
