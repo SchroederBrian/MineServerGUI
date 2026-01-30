@@ -98,31 +98,100 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="servers-dir-input" class="form-label">Minecraft Servers Directory</label>
-                        <div class="input-group">
-                        <input type="text" class="form-control" id="servers-dir-input" placeholder="Enter path to servers directory">
-                            <button class="btn btn-outline-secondary browse-btn" type="button" data-input-target="servers-dir-input">Browse</button>
+                    <ul class="nav nav-tabs mb-3" id="settingsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="general-settings-tab" data-bs-toggle="tab" data-bs-target="#general-settings" type="button" role="tab">
+                                <i class="fas fa-cog me-2"></i>General
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="oauth-settings-tab" data-bs-toggle="tab" data-bs-target="#oauth-settings" type="button" role="tab">
+                                <i class="fas fa-key me-2"></i>OAuth2 Clients
+                            </button>
+                        </li>
+                    </ul>
+                    
+                    <div class="tab-content">
+                        <!-- General Settings Tab -->
+                        <div class="tab-pane fade show active" id="general-settings" role="tabpanel">
+                            <div class="mb-3">
+                                <label for="servers-dir-input" class="form-label">Minecraft Servers Directory</label>
+                                <div class="input-group">
+                                <input type="text" class="form-control" id="servers-dir-input" placeholder="Enter path to servers directory">
+                                    <button class="btn btn-outline-secondary browse-btn" type="button" data-input-target="servers-dir-input">Browse</button>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="configs-dir-input" class="form-label">Configs Directory</label>
+                                <div class="input-group">
+                                <input type="text" class="form-control" id="configs-dir-input" placeholder="Enter path to configs directory">
+                                    <button class="btn btn-outline-secondary browse-btn" type="button" data-input-target="configs-dir-input">Browse</button>
+                                </div>
+                                <div class="form-text">All server-specific scripts and configurations will be stored here.</div>
+                            </div>
+                            <button class="btn btn-primary" id="save-settings-btn">
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                <span class="button-text">Save Settings</span>
+                            </button>
+                            <hr>
+                            <h5>Manage Screens</h5>
+                            <div id="screen-list" class="list-group mb-3">
+                                <!-- Screen sessions will be listed here -->
+                            </div>
+                            <button class="btn btn-danger" id="terminate-all-screens-btn">Terminate All Screens</button>
+                        </div>
+                        
+                        <!-- OAuth2 Settings Tab -->
+                        <div class="tab-pane fade" id="oauth-settings" role="tabpanel">
+                            <div class="alert alert-info mb-3">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>OAuth2 clients inherit all permissions from your account:</strong>
+                                <span id="oauth-user-display" class="text-decoration-underline">Loading...</span>
+                                <button class="btn btn-sm btn-outline-primary ms-2" id="view-permissions-btn">
+                                    <i class="fas fa-shield-alt me-1"></i>View My Permissions
+                                </button>
+                            </div>
+
+                            <div class="alert alert-success mb-3">
+                                <i class="fas fa-code me-2"></i>
+                                <strong>API Documentation:</strong> Explore and test the REST API with interactive Swagger documentation.
+                                <a href="/apidocs" target="_blank" class="btn btn-sm btn-success ms-2">
+                                    <i class="fas fa-external-link-alt me-1"></i>Open Swagger UI
+                                </a>
+                            </div>
+                            
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">Your OAuth2 Clients</h5>
+                                <button class="btn btn-primary" id="create-oauth-client-btn">
+                                    <i class="fas fa-plus me-2"></i>Create OAuth2 Client
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-dark table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Client Name</th>
+                                            <th>Client ID</th>
+                                            <th>Created</th>
+                                            <th>Last Used</th>
+                                            <th class="text-center">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="oauth-clients-list">
+                                        <tr>
+                                            <td colspan="5" class="text-center text-body-secondary">Loading OAuth2 clients...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <div class="alert alert-warning mt-3">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                <strong>Important:</strong> OAuth2 client secrets are shown only once when created. Store them securely!
+                            </div>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="configs-dir-input" class="form-label">Configs Directory</label>
-                        <div class="input-group">
-                        <input type="text" class="form-control" id="configs-dir-input" placeholder="Enter path to configs directory">
-                            <button class="btn btn-outline-secondary browse-btn" type="button" data-input-target="configs-dir-input">Browse</button>
-                        </div>
-                        <div class="form-text">All server-specific scripts and configurations will be stored here.</div>
-                    </div>
-                    <button class="btn btn-primary" id="save-settings-btn">
-                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                        <span class="button-text">Save Settings</span>
-                    </button>
-                    <hr>
-                    <h5>Manage Screens</h5>
-                    <div id="screen-list" class="list-group mb-3">
-                        <!-- Screen sessions will be listed here -->
-                    </div>
-                    <button class="btn btn-danger" id="terminate-all-screens-btn">Terminate All Screens</button>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -479,6 +548,99 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="confirm-import-template">Import</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- OAuth2 Client Secret Modal -->
+    <div class="modal fade" id="oauthSecretModal" tabindex="-1" aria-labelledby="oauthSecretModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header bg-success">
+                    <h5 class="modal-title" id="oauthSecretModalLabel"><i class="fas fa-check-circle me-2"></i>OAuth2 Client Created</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Important!</strong> Save these credentials now. The client secret will not be shown again.
+                    </div>
+                    <div class="mb-3">
+                        <label for="oauth-client-name-display" class="form-label">Client Name</label>
+                        <input type="text" class="form-control" id="oauth-client-name-display" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="oauth-client-id-display" class="form-label">Client ID</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace" id="oauth-client-id-display" readonly>
+                            <button class="btn btn-outline-secondary" type="button" id="copy-client-id-btn" title="Copy Client ID">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="oauth-client-secret-display" class="form-label">Client Secret</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace" id="oauth-client-secret-display" readonly>
+                            <button class="btn btn-outline-secondary" type="button" id="copy-client-secret-btn" title="Copy Client Secret">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary w-100" id="copy-oauth-credentials">
+                        <i class="fas fa-clipboard me-2"></i>Copy Both to Clipboard
+                    </button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Permissions Modal -->
+    <div class="modal fade" id="userPermissionsModal" tabindex="-1" aria-labelledby="userPermissionsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="userPermissionsModalLabel"><i class="fas fa-shield-alt me-2"></i>Your Permissions</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        OAuth2 clients created by your account inherit all of these permissions.
+                    </div>
+                    <div id="user-permissions-content">
+                        <p class="text-center text-body-secondary">Loading permissions...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create OAuth2 Client Modal -->
+    <div class="modal fade" id="createOAuthClientModal" tabindex="-1" aria-labelledby="createOAuthClientModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createOAuthClientModalLabel">Create OAuth2 Client</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="new-oauth-client-name" class="form-label">Client Name</label>
+                        <input type="text" class="form-control" id="new-oauth-client-name" placeholder="My API Client" required>
+                        <div class="form-text">A descriptive name for this OAuth2 client (e.g., "Mobile App", "CI/CD Pipeline")</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirm-create-oauth-client">Create Client</button>
                 </div>
             </div>
         </div>

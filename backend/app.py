@@ -6,6 +6,7 @@ import re
 from flask import Flask, jsonify, request, abort, send_from_directory, session
 from flask_cors import CORS
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flasgger import Swagger
 from werkzeug.security import generate_password_hash, check_password_hash
 from threading import Thread, Lock
 import time
@@ -18,16 +19,70 @@ import sqlite3
 import secrets
 from functools import wraps
 from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
 try:
     import psutil
 except ImportError:
     psutil = None
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+try:
+    from jose import jwt, JWTError
+except ImportError:
+    jwt = None
+    JWTError = None
 
 # --- Configuration ---
 app = Flask(__name__, static_folder='..', static_url_path='')
 CORS(app, supports_credentials=True)
+
+# --- Swagger Configuration ---
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": 'apispec',
+            "route": '/apispec.json',
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs"
+}
+
+swagger_template = {
+    "swagger": "2.0",
+    "info": {
+        "title": "MineServerGUI API",
+        "description": "API for managing Minecraft servers through MineServerGUI",
+        "version": "1.0.0",
+        "contact": {
+            "name": "MineServerGUI"
+        }
+    },
+    "securityDefinitions": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "OAuth2 Bearer token. Format: Bearer <token>"
+        },
+        "Session": {
+            "type": "apiKey",
+            "name": "Cookie",
+            "in": "header",
+            "description": "Session-based authentication"
+        }
+    },
+    "security": [
+        {"Bearer": []},
+        {"Session": []}
+    ]
+}
+
+swagger = Swagger(app, config=swagger_config, template=swagger_template)
 
 # --- Configuration Loading ---
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
@@ -277,6 +332,46 @@ def init_db():
             WHERE can_delete = 1 AND can_delete_server = 0
         ''')
     
+    # ===== OAUTH2 TABLES =====
+    # Create OAuth2 clients table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS oauth2_clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE NOT NULL,
+            client_secret_hash TEXT NOT NULL,
+            client_name TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Create OAuth2 tokens table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS oauth2_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            access_token TEXT UNIQUE NOT NULL,
+            client_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(client_id) REFERENCES oauth2_clients(client_id) ON DELETE CASCADE,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Create index for faster token lookups
+    c.execute('''
+        CREATE INDEX IF NOT EXISTS idx_oauth2_tokens_access_token 
+        ON oauth2_tokens(access_token)
+    ''')
+    
+    c.execute('''
+        CREATE INDEX IF NOT EXISTS idx_oauth2_tokens_expires_at 
+        ON oauth2_tokens(expires_at)
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -498,12 +593,278 @@ def is_valid_server_name(server_name):
     """Validate server name to prevent directory traversal."""
     return bool(server_name) and '..' not in server_name and '/' not in server_name and '\\' not in server_name
 
+def api_auth_required(f):
+    """
+    Dual authentication decorator that supports both OAuth2 Bearer tokens and session-based authentication.
+    OAuth2 tokens are checked first, then falls back to session authentication.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_user = None
+        
+        # Check for OAuth2 Bearer token first
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # Remove "Bearer " prefix
+            api_user = validate_access_token(token)
+            if api_user:
+                # Valid OAuth2 token - pass api_user to the function
+                return f(*args, api_user=api_user, **kwargs)
+            else:
+                # Invalid or expired token
+                return jsonify({
+                    'msg': 'Invalid or expired access token',
+                    'code': 'ErrInvalidToken'
+                }), 401
+        
+        # Fallback to session-based authentication
+        if current_user.is_authenticated:
+            return f(*args, api_user=current_user, **kwargs)
+        
+        # No valid authentication found
+        return jsonify({
+            'msg': 'Authentication required. Provide either a Bearer token or valid session',
+            'code': 'ErrUnauthorized'
+        }), 401
+    
+    return decorated_function
+
+def api_require_admin(f):
+    """Decorator to require admin role for API endpoints (works with both auth methods)."""
+    @wraps(f)
+    @api_auth_required
+    def wrapper(*args, api_user=None, **kwargs):
+        if not is_admin_user(api_user):
+            return jsonify({
+                'msg': 'Admin access required',
+                'code': 'ErrAdminRequired'
+            }), 403
+        return f(*args, api_user=api_user, **kwargs)
+    return wrapper
+
+def api_require_permission(permission_key, server_name_arg='server_name'):
+    """Decorator to require specific permission for a server (API version)."""
+    def decorator(f):
+        @wraps(f)
+        @api_auth_required
+        def wrapper(*args, api_user=None, **kwargs):
+            # Admins bypass permission checks
+            if is_admin_user(api_user):
+                return f(*args, api_user=api_user, **kwargs)
+            
+            # Get server name from route arguments
+            server_name = kwargs.get(server_name_arg)
+            if not server_name:
+                return jsonify({
+                    'msg': 'Server name required',
+                    'code': 'ErrMissingServerName'
+                }), 400
+            
+            # Check permissions
+            permissions = get_user_permissions(api_user.id, server_name)
+            if not permissions.get(permission_key, False):
+                return jsonify({
+                    'msg': f'Insufficient permissions - {permission_key} required',
+                    'code': 'ErrInsufficientPermissions',
+                    'metadata': {'required_permission': permission_key}
+                }), 403
+            
+            return f(*args, api_user=api_user, **kwargs)
+        return wrapper
+    return decorator
+
 @login_manager.user_loader
 def load_user(user_id):
     return get_user_by_id(user_id)
 
 # Initialize database
 init_db()
+
+# --- OAuth2 Functions ---
+
+def get_oauth_config():
+    """Get OAuth2 configuration from config."""
+    return {
+        'token_expiry': config.get('oauth2_token_expiry', 3600),
+        'enabled': config.get('oauth2_enabled', True),
+        'jwt_secret': config.get('secret_key')
+    }
+
+def create_oauth2_client(user_id, client_name):
+    """Create a new OAuth2 client for a user."""
+    if not jwt:
+        return None, "JWT library not available"
+    
+    client_id = str(uuid.uuid4())
+    client_secret = secrets.token_urlsafe(32)
+    client_secret_hash = generate_password_hash(client_secret)
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('''
+            INSERT INTO oauth2_clients (client_id, client_secret_hash, client_name, user_id)
+            VALUES (?, ?, ?, ?)
+        ''', (client_id, client_secret_hash, client_name, user_id))
+        conn.commit()
+        conn.close()
+        return {'client_id': client_id, 'client_secret': client_secret, 'client_name': client_name}, None
+    except sqlite3.IntegrityError as e:
+        conn.close()
+        return None, str(e)
+
+def validate_client_credentials(client_id, client_secret):
+    """Validate OAuth2 client credentials and return user_id if valid."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        SELECT client_secret_hash, user_id, client_name 
+        FROM oauth2_clients 
+        WHERE client_id = ?
+    ''', (client_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    client_secret_hash, user_id, client_name = row
+    if check_password_hash(client_secret_hash, client_secret):
+        return {'user_id': user_id, 'client_id': client_id, 'client_name': client_name}
+    return None
+
+def generate_access_token(client_id, user_id):
+    """Generate a JWT access token for an OAuth2 client."""
+    if not jwt:
+        return None
+    
+    oauth_config = get_oauth_config()
+    expires_at = datetime.utcnow() + timedelta(seconds=oauth_config['token_expiry'])
+    
+    payload = {
+        'client_id': client_id,
+        'user_id': user_id,
+        'exp': expires_at,
+        'iat': datetime.utcnow(),
+        'type': 'access_token'
+    }
+    
+    token = jwt.encode(payload, oauth_config['jwt_secret'], algorithm='HS256')
+    
+    # Store token in database
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('''
+            INSERT INTO oauth2_tokens (access_token, client_id, user_id, expires_at)
+            VALUES (?, ?, ?, ?)
+        ''', (token, client_id, user_id, expires_at.isoformat()))
+        conn.commit()
+        
+        # Update last_used for client
+        c.execute('''
+            UPDATE oauth2_clients 
+            SET last_used = CURRENT_TIMESTAMP 
+            WHERE client_id = ?
+        ''', (client_id,))
+        conn.commit()
+        conn.close()
+        return token
+    except Exception as e:
+        conn.close()
+        print(f"Error storing token: {e}")
+        return None
+
+def validate_access_token(token):
+    """Validate a JWT access token and return user object if valid."""
+    if not jwt:
+        return None
+    
+    try:
+        oauth_config = get_oauth_config()
+        payload = jwt.decode(token, oauth_config['jwt_secret'], algorithms=['HS256'])
+        
+        # Check if token exists in database and is not expired
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('''
+            SELECT user_id, expires_at 
+            FROM oauth2_tokens 
+            WHERE access_token = ?
+        ''', (token,))
+        row = c.fetchone()
+        
+        if not row:
+            conn.close()
+            return None
+        
+        user_id, expires_at_str = row
+        expires_at = datetime.fromisoformat(expires_at_str)
+        
+        if datetime.utcnow() > expires_at:
+            # Token expired, delete it
+            c.execute('DELETE FROM oauth2_tokens WHERE access_token = ?', (token,))
+            conn.commit()
+            conn.close()
+            return None
+        
+        conn.close()
+        
+        # Return user object
+        return get_user_by_id(user_id)
+        
+    except JWTError:
+        return None
+    except Exception as e:
+        print(f"Error validating token: {e}")
+        return None
+
+def delete_oauth2_client(client_id, user_id):
+    """Delete an OAuth2 client (only if owned by user)."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Delete tokens first (foreign key cascade should handle this, but let's be explicit)
+    c.execute('DELETE FROM oauth2_tokens WHERE client_id = ?', (client_id,))
+    
+    # Delete client
+    c.execute('DELETE FROM oauth2_clients WHERE client_id = ? AND user_id = ?', (client_id, user_id))
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+    
+    return deleted > 0
+
+def list_oauth2_clients(user_id):
+    """List all OAuth2 clients for a user."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        SELECT client_id, client_name, created_at, last_used
+        FROM oauth2_clients
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+    ''', (user_id,))
+    
+    clients = [{
+        'client_id': row[0],
+        'client_name': row[1],
+        'created_at': row[2],
+        'last_used': row[3]
+    } for row in c.fetchall()]
+    
+    conn.close()
+    return clients
+
+def cleanup_expired_tokens():
+    """Remove expired tokens from database."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('DELETE FROM oauth2_tokens WHERE expires_at < ?', (datetime.utcnow().isoformat(),))
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
 
 # --- Global State ---
 # This dictionary will hold the running server subprocesses
@@ -622,12 +983,58 @@ def download_jar(url, path):
 
 @app.route('/api/auth/setup-required', methods=['GET'])
 def setup_required():
-    """Check if initial setup is required."""
+    """Check if initial setup is required
+    ---
+    tags:
+      - Authentication
+    responses:
+      200:
+        description: Setup status
+        schema:
+          type: object
+          properties:
+            setup_required:
+              type: boolean
+              description: True if no users exist and setup is needed
+    """
     return jsonify({'setup_required': not has_users()})
 
 @app.route('/api/auth/setup', methods=['POST'])
 def setup():
-    """Create the first admin user."""
+    """Create the first admin user
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              example: admin
+            password:
+              type: string
+              example: securepassword
+              minLength: 6
+    responses:
+      201:
+        description: Admin account created successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+      400:
+        description: Setup already completed or invalid input
+      500:
+        description: Failed to create user
+    """
     if has_users():
         return jsonify({'error': 'Setup already completed'}), 400
     
@@ -650,7 +1057,44 @@ def setup():
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Login endpoint."""
+    """User Login
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              example: admin
+            password:
+              type: string
+              example: password123
+    responses:
+      200:
+        description: Login successful
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: Login successful
+            username:
+              type: string
+            role:
+              type: string
+      401:
+        description: Invalid credentials
+      403:
+        description: User account is disabled
+    """
     data = request.get_json()
     username = data.get('username', '').strip()
     password = data.get('password', '')
@@ -681,15 +1125,54 @@ def login():
     }), 200
 
 @app.route('/api/auth/logout', methods=['POST'])
-@login_required
-def logout():
-    """Logout endpoint."""
+@api_auth_required
+def logout(api_user=None):
+    """User Logout
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+      - Session: []
+    parameters:
+      - name: Authorization
+        in: header
+        type: string
+        description: Bearer token (optional if using session)
+    responses:
+      200:
+        description: Logout successful
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: Logout successful
+      401:
+        description: Authentication required
+    """
     logout_user()
     return jsonify({'message': 'Logout successful'}), 200
 
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
-    """Check authentication status."""
+    """Check authentication status
+    ---
+    tags:
+      - Authentication
+    responses:
+      200:
+        description: Authentication status
+        schema:
+          type: object
+          properties:
+            authenticated:
+              type: boolean
+            username:
+              type: string
+            role:
+              type: string
+    """
     if current_user.is_authenticated:
         return jsonify({
             'authenticated': True,
@@ -700,12 +1183,151 @@ def auth_status():
     return jsonify({'authenticated': False}), 200
 
 
+# --- OAuth2 API Endpoints ---
+
+@app.route('/oauth2/token', methods=['POST'])
+def oauth2_token():
+    """OAuth2 token endpoint - implements client credentials flow."""
+    if not jwt:
+        return jsonify({
+            'msg': 'OAuth2 functionality not available - JWT library not installed',
+            'code': 'ErrOAuth2Unavailable'
+        }), 500
+    
+    oauth_config = get_oauth_config()
+    if not oauth_config.get('enabled', True):
+        return jsonify({
+            'msg': 'OAuth2 is currently disabled',
+            'code': 'ErrOAuth2Disabled'
+        }), 503
+    
+    # Get credentials from form data or JSON
+    if request.is_json:
+        data = request.get_json()
+        client_id = data.get('client_id')
+        client_secret = data.get('client_secret')
+        grant_type = data.get('grant_type')
+    else:
+        client_id = request.form.get('client_id')
+        client_secret = request.form.get('client_secret')
+        grant_type = request.form.get('grant_type')
+    
+    # Validate required parameters
+    if not all([client_id, client_secret, grant_type]):
+        return jsonify({
+            'msg': 'Missing required parameters: client_id, client_secret, and grant_type',
+            'code': 'ErrMissingParameters'
+        }), 400
+    
+    # Only support client_credentials grant type
+    if grant_type != 'client_credentials':
+        return jsonify({
+            'msg': 'Unsupported grant type. Only client_credentials is supported',
+            'code': 'ErrUnsupportedGrantType',
+            'metadata': {'grant_type': grant_type}
+        }), 400
+    
+    # Validate client credentials
+    client_info = validate_client_credentials(client_id, client_secret)
+    if not client_info:
+        return jsonify({
+            'msg': 'Invalid client credentials',
+            'code': 'ErrInvalidCredentials'
+        }), 401
+    
+    # Generate access token
+    token = generate_access_token(client_id, client_info['user_id'])
+    if not token:
+        return jsonify({
+            'msg': 'Failed to generate access token',
+            'code': 'ErrTokenGeneration'
+        }), 500
+    
+    return jsonify({
+        'access_token': token,
+        'token_type': 'Bearer',
+        'expires_in': oauth_config['token_expiry']
+    }), 200
+
+@app.route('/api/self/oauth2', methods=['GET'])
+@api_auth_required
+def list_user_oauth2_clients(api_user=None):
+    """List all OAuth2 clients for the current user."""
+    clients = list_oauth2_clients(api_user.id)
+    return jsonify({'clients': clients}), 200
+
+@app.route('/api/self/oauth2', methods=['POST'])
+@api_auth_required
+def create_user_oauth2_client(api_user=None):
+    """Create a new OAuth2 client for the current user."""
+    if not jwt:
+        return jsonify({
+            'msg': 'OAuth2 functionality not available - JWT library not installed',
+            'code': 'ErrOAuth2Unavailable'
+        }), 500
+    
+    data = request.get_json() or {}
+    client_name = data.get('client_name', '').strip()
+    
+    if not client_name:
+        return jsonify({
+            'msg': 'Client name is required',
+            'code': 'ErrMissingClientName'
+        }), 400
+    
+    if len(client_name) < 3:
+        return jsonify({
+            'msg': 'Client name must be at least 3 characters long',
+            'code': 'ErrClientNameTooShort'
+        }), 400
+    
+    client_data, error = create_oauth2_client(api_user.id, client_name)
+    if error:
+        return jsonify({
+            'msg': 'Failed to create OAuth2 client',
+            'code': 'ErrClientCreation',
+            'metadata': {'error': error}
+        }), 500
+    
+    # Return client_id and client_secret (secret shown only once!)
+    return jsonify({
+        'client_id': client_data['client_id'],
+        'client_secret': client_data['client_secret'],
+        'client_name': client_data['client_name'],
+        'message': 'OAuth2 client created successfully. Save the client_secret now - it will not be shown again!'
+    }), 201
+
+@app.route('/api/self/oauth2/<client_id>', methods=['DELETE'])
+@api_auth_required
+def delete_user_oauth2_client(client_id, api_user=None):
+    """Delete an OAuth2 client owned by the current user."""
+    success = delete_oauth2_client(client_id, api_user.id)
+    
+    if not success:
+        return jsonify({
+            'msg': 'OAuth2 client not found or you do not have permission to delete it',
+            'code': 'ErrClientNotFound'
+        }), 404
+    
+    return jsonify({'message': 'OAuth2 client deleted successfully'}), 200
+
+@app.route('/api/self', methods=['GET'])
+@api_auth_required
+def get_current_user_info(api_user=None):
+    """Get current user information."""
+    return jsonify({
+        'id': api_user.id,
+        'username': api_user.username,
+        'role': getattr(api_user, 'role', 'user'),
+        'is_admin': is_admin_user(api_user)
+    }), 200
+
+
 # --- Admin API Endpoints ---
 
 @app.route('/api/admin/users', methods=['GET'])
-@login_required
-@require_admin
-def list_users():
+@api_require_admin
+def list_users(api_user=None):
     """List all users (admin only)."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -724,9 +1346,8 @@ def list_users():
     return jsonify({'users': users}), 200
 
 @app.route('/api/admin/users', methods=['POST'])
-@login_required
-@require_admin
-def create_user_admin():
+@api_require_admin
+def create_user_admin(api_user=None):
     """Create a new user (admin only)."""
     data = request.get_json() or {}
     username = data.get('username', '').strip()
@@ -747,9 +1368,8 @@ def create_user_admin():
     return jsonify({'id': user_id, 'username': username, 'role': role}), 201
 
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
-@login_required
-@require_admin
-def update_user_admin(user_id):
+@api_require_admin
+def update_user_admin(user_id, api_user=None):
     """Update user (admin only)."""
     data = request.get_json() or {}
     role = data.get('role')
@@ -791,9 +1411,8 @@ def update_user_admin(user_id):
     return jsonify({'message': 'User updated successfully'}), 200
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
-@login_required
-@require_admin
-def delete_user_admin(user_id):
+@api_require_admin
+def delete_user_admin(user_id, api_user=None):
     """Delete user (admin only)."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -809,9 +1428,8 @@ def delete_user_admin(user_id):
     return jsonify({'message': 'User deleted successfully'}), 200
 
 @app.route('/api/admin/groups', methods=['GET'])
-@login_required
-@require_admin
-def list_groups():
+@api_require_admin
+def list_groups(api_user=None):
     """List all groups (admin only)."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -834,9 +1452,8 @@ def list_groups():
     return jsonify({'groups': groups}), 200
 
 @app.route('/api/admin/groups', methods=['POST'])
-@login_required
-@require_admin
-def create_group():
+@api_require_admin
+def create_group(api_user=None):
     """Create a new group (admin only)."""
     data = request.get_json() or {}
     name = data.get('name', '').strip()
@@ -858,9 +1475,8 @@ def create_group():
         return jsonify({'error': 'Group name already exists'}), 409
 
 @app.route('/api/admin/groups/<int:group_id>', methods=['PUT'])
-@login_required
-@require_admin
-def update_group(group_id):
+@api_require_admin
+def update_group(group_id, api_user=None):
     """Update group (admin only)."""
     data = request.get_json() or {}
     name = data.get('name')
@@ -899,9 +1515,8 @@ def update_group(group_id):
     return jsonify({'message': 'Group updated successfully'}), 200
 
 @app.route('/api/admin/groups/<int:group_id>', methods=['DELETE'])
-@login_required
-@require_admin
-def delete_group(group_id):
+@api_require_admin
+def delete_group(group_id, api_user=None):
     """Delete group (admin only)."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -917,9 +1532,8 @@ def delete_group(group_id):
     return jsonify({'message': 'Group deleted successfully'}), 200
 
 @app.route('/api/admin/groups/<int:group_id>/members', methods=['GET'])
-@login_required
-@require_admin
-def list_group_members(group_id):
+@api_require_admin
+def list_group_members(group_id, api_user=None):
     """List members of a group (admin only)."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -942,9 +1556,8 @@ def list_group_members(group_id):
     return jsonify({'members': members}), 200
 
 @app.route('/api/admin/groups/<int:group_id>/members', methods=['POST'])
-@login_required
-@require_admin
-def add_group_member(group_id):
+@api_require_admin
+def add_group_member(group_id, api_user=None):
     """Add user to group (admin only)."""
     data = request.get_json() or {}
     user_id = data.get('user_id')
@@ -964,9 +1577,8 @@ def add_group_member(group_id):
         return jsonify({'error': 'User already in group or invalid IDs'}), 409
 
 @app.route('/api/admin/groups/<int:group_id>/members/<int:user_id>', methods=['DELETE'])
-@login_required
-@require_admin
-def remove_group_member(group_id, user_id):
+@api_require_admin
+def remove_group_member(group_id, user_id, api_user=None):
     """Remove user from group (admin only)."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -980,9 +1592,8 @@ def remove_group_member(group_id, user_id):
     return jsonify({'message': 'User removed from group successfully'}), 200
 
 @app.route('/api/admin/servers/<server_name>/permissions', methods=['GET'])
-@login_required
-@require_admin
-def get_server_permissions(server_name):
+@api_require_admin
+def get_server_permissions(server_name, api_user=None):
     """Get all permissions for a server (admin only)."""
     if not is_valid_server_name(server_name):
         return jsonify({'error': 'Invalid server name'}), 400
@@ -1066,9 +1677,8 @@ def get_server_permissions(server_name):
     }), 200
 
 @app.route('/api/admin/servers/<server_name>/permissions/users/<int:user_id>', methods=['PUT'])
-@login_required
-@require_admin
-def set_user_permissions(server_name, user_id):
+@api_require_admin
+def set_user_permissions(server_name, user_id, api_user=None):
     """Set user permissions for a server (admin only)."""
     if not is_valid_server_name(server_name):
         return jsonify({'error': 'Invalid server name'}), 400
@@ -1128,9 +1738,8 @@ def set_user_permissions(server_name, user_id):
     return jsonify({'message': 'User permissions updated successfully'}), 200
 
 @app.route('/api/admin/servers/<server_name>/permissions/groups/<int:group_id>', methods=['PUT'])
-@login_required
-@require_admin
-def set_group_permissions(server_name, group_id):
+@api_require_admin
+def set_group_permissions(server_name, group_id, api_user=None):
     """Set group permissions for a server (admin only)."""
     if not is_valid_server_name(server_name):
         return jsonify({'error': 'Invalid server name'}), 400
@@ -1190,9 +1799,8 @@ def set_group_permissions(server_name, group_id):
     return jsonify({'message': 'Group permissions updated successfully'}), 200
 
 @app.route('/api/admin/servers/<server_name>/permissions/users/<int:user_id>', methods=['DELETE'])
-@login_required
-@require_admin
-def delete_user_permissions(server_name, user_id):
+@api_require_admin
+def delete_user_permissions(server_name, user_id, api_user=None):
     """Remove user permissions for a server (admin only)."""
     if not is_valid_server_name(server_name):
         return jsonify({'error': 'Invalid server name'}), 400
@@ -1209,13 +1817,13 @@ def delete_user_permissions(server_name, user_id):
     return jsonify({'message': 'User permissions removed successfully'}), 200
 
 @app.route('/api/user/permissions/<server_name>', methods=['GET'])
-@login_required
-def get_current_user_permissions(server_name):
+@api_auth_required
+def get_current_user_permissions(server_name, api_user=None):
     """Get current user's permissions for a server."""
     if not is_valid_server_name(server_name):
         return jsonify({'error': 'Invalid server name'}), 400
     
-    if is_admin_user(current_user):
+    if is_admin_user(api_user):
         # Admins have all permissions
         permissions = {
             'can_view_logs': True,
@@ -1234,7 +1842,7 @@ def get_current_user_permissions(server_name):
             'can_delete_server': True
         }
     else:
-        permissions = get_user_permissions(current_user.id, server_name)
+        permissions = get_user_permissions(api_user.id, server_name)
     
     return jsonify(permissions), 200
 
@@ -1242,16 +1850,16 @@ def get_current_user_permissions(server_name):
 # --- API Endpoints ---
 
 @app.route('/api/servers/<server_name>', methods=['GET'])
-@login_required
-def get_server_details(server_name):
+@api_auth_required
+def get_server_details(server_name, api_user=None):
     """Gets all details for a single server."""
     # Basic sanitization for the server name itself
     if not is_valid_server_name(server_name):
         return jsonify({"error": "Invalid server name format"}), 400
     
     # Allow access if user is admin OR has any viewing permission (old or new)
-    if not is_admin_user(current_user):
-        permissions = get_user_permissions(current_user.id, server_name)
+    if not is_admin_user(api_user):
+        permissions = get_user_permissions(api_user.id, server_name)
         has_any_view_permission = (
             permissions.get('can_view_logs', False) or 
             permissions.get('can_view_analytics', False) or
@@ -1281,9 +1889,8 @@ def get_server_details(server_name):
 
 
 @app.route('/api/servers/<server_name>/port', methods=['POST'])
-@login_required
-@require_permission('can_edit_config')
-def update_server_port(server_name):
+@api_require_permission('can_edit_config')
+def update_server_port(server_name, api_user=None):
     """Updates the server port in the server.properties file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1332,12 +1939,93 @@ def update_server_port(server_name):
 
 
 @app.route('/api/servers', methods=['GET', 'POST'])
-@login_required
-def handle_servers():
-    """Handles getting the server list and creating new servers."""
+@api_auth_required
+def handle_servers(api_user=None):
+    """List or Create Minecraft Servers
+    ---
+    tags:
+      - Servers
+    security:
+      - Bearer: []
+      - Session: []
+    parameters:
+      - name: Authorization
+        in: header
+        type: string
+        description: Bearer token (optional if using session)
+      - name: body
+        in: body
+        required: false
+        description: Required only for POST requests to create a new server
+        schema:
+          type: object
+          required:
+            - server_name
+            - version
+            - eula_accepted
+            - server_type
+          properties:
+            server_name:
+              type: string
+              pattern: "^[a-zA-Z0-9_-]+$"
+              example: my-server
+            version:
+              type: string
+              example: "1.20.1"
+            port:
+              type: integer
+              default: 25565
+              example: 25565
+            eula_accepted:
+              type: boolean
+              description: Must be true to accept Minecraft EULA
+              example: true
+            server_type:
+              type: string
+              enum: [vanilla, paper, spigot, fabric, forge]
+              example: paper
+    responses:
+      200:
+        description: List of servers (GET request)
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              version:
+                type: string
+              port:
+                type: integer
+              server_type:
+                type: string
+              status:
+                type: string
+                enum: [Running, Stopped]
+      201:
+        description: Server created successfully (POST request)
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+      400:
+        description: Invalid input or missing required fields
+      401:
+        description: Authentication required
+      403:
+        description: Admin access required to create servers
+      409:
+        description: Server name or port already in use
+      500:
+        description: Server creation failed
+    """
     if request.method == 'POST':
         # Only admins can create servers
-        if not is_admin_user(current_user):
+        if not is_admin_user(api_user):
             return jsonify({'error': 'Admin access required to create servers'}), 403
         
         data = request.get_json()
@@ -1402,10 +2090,10 @@ def handle_servers():
         server_path = os.path.join(SERVERS_DIR, server_name)
         if os.path.isdir(server_path):
             # Filter servers based on permissions (admins see all)
-            if is_admin_user(current_user):
+            if is_admin_user(api_user):
                 has_access = True
             else:
-                permissions = get_user_permissions(current_user.id, server_name)
+                permissions = get_user_permissions(api_user.id, server_name)
                 # User needs at least one viewing permission to see the server
                 has_access = (permissions.get('can_view_logs', False) or 
                             permissions.get('can_view_analytics', False) or
@@ -1426,12 +2114,53 @@ def handle_servers():
 
 
 @app.route('/api/servers/<server_name>/<action>', methods=['POST'])
-@login_required
-def server_action(server_name, action):
-    """Handles start, stop, and restart actions for a server."""
+@api_auth_required
+def server_action(server_name, action, api_user=None):
+    """Start, Stop, or Restart a Minecraft Server
+    ---
+    tags:
+      - Servers
+    security:
+      - Bearer: []
+      - Session: []
+    parameters:
+      - name: server_name
+        in: path
+        type: string
+        required: true
+        description: Name of the Minecraft server
+      - name: action
+        in: path
+        type: string
+        required: true
+        enum: [start, stop, restart]
+        description: Action to perform on the server
+      - name: Authorization
+        in: header
+        type: string
+        description: Bearer token (optional if using session)
+    responses:
+      200:
+        description: Action completed successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+      400:
+        description: Invalid action specified
+      401:
+        description: Authentication required
+      403:
+        description: Insufficient permissions for this action
+      404:
+        description: Server not found
+      500:
+        description: Action failed
+    """
     # Check granular permissions based on specific action
-    if not is_admin_user(current_user):
-        permissions = get_user_permissions(current_user.id, server_name)
+    if not is_admin_user(api_user):
+        permissions = get_user_permissions(api_user.id, server_name)
         
         if action == 'start':
             if not (permissions.get('can_start_server', False) or permissions.get('can_start_stop', False)):
@@ -1461,9 +2190,8 @@ def server_action(server_name, action):
 
 
 @app.route('/api/servers/<server_name>/clear-logs', methods=['POST'])
-@login_required
-@require_permission('can_edit_config')
-def clear_logs(server_name):
+@api_require_permission('can_edit_config')
+def clear_logs(server_name, api_user=None):
     """Clears the server's log file and resets the log counter."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     log_file_path = os.path.join(server_path, 'logs', 'latest.log')
@@ -1512,8 +2240,8 @@ def sanitize_path(base_path, user_path):
     return full_path
 
 @app.route('/api/servers/<server_name>/files', methods=['GET'])
-@login_required
-def list_files(server_name):
+@api_auth_required
+def list_files(server_name, api_user=None):
     """Lists files and folders in a given path."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1546,8 +2274,8 @@ def list_files(server_name):
     return jsonify(items)
 
 @app.route('/api/servers/<server_name>/files/content', methods=['GET', 'POST'])
-@login_required
-def handle_file_content(server_name):
+@api_auth_required
+def handle_file_content(server_name, api_user=None):
     """Gets or saves the content of a file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1604,8 +2332,8 @@ def get_install_script_path(server_name):
     return os.path.join(server_config_dir, 'install_script.json')
 
 @app.route('/api/servers/<server_name>/install-script', methods=['GET', 'POST'])
-@login_required
-def handle_install_script(server_name):
+@api_auth_required
+def handle_install_script(server_name, api_user=None):
     script_path = get_install_script_path(server_name)
     # Ensure the directory exists before trying to write to it
     os.makedirs(os.path.dirname(script_path), exist_ok=True)
@@ -1630,8 +2358,8 @@ def get_start_script_path(server_name):
     return os.path.join(server_config_dir, 'start_script.json')
 
 @app.route('/api/servers/<server_name>/start-script', methods=['GET', 'POST'])
-@login_required
-def handle_start_script(server_name):
+@api_auth_required
+def handle_start_script(server_name, api_user=None):
     script_path = get_start_script_path(server_name)
     # Ensure the directory exists before trying to write to it
     os.makedirs(os.path.dirname(script_path), exist_ok=True)
@@ -1652,8 +2380,8 @@ def handle_start_script(server_name):
         return jsonify({"commands": []})
 
 @app.route('/api/servers/<server_name>/install', methods=['POST'])
-@login_required
-def run_install_script(server_name):
+@api_auth_required
+def run_install_script(server_name, api_user=None):
     """Runs the installation script for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -1720,19 +2448,60 @@ def run_install_script(server_name):
     return jsonify({"message": "Installation process started. Check the Logs tab for output."})
 
 @app.route('/api/servers/<server_name>/install/log', methods=['GET'])
-@login_required
-def get_install_log(server_name):
+@api_auth_required
+def get_install_log(server_name, api_user=None):
     """Retrieves the current installation log for a server."""
     return jsonify({"log": ["This endpoint is deprecated. Check the main log file."]})
 
 
 @app.route('/api/servers/<server_name>/status', methods=['GET'])
-@login_required
-def get_server_status(server_name):
-    """
-    Gets the status of a server.
-    Note: With screen, we can't get detailed metrics like CPU/Memory easily.
-    This is now a simplified status check.
+@api_auth_required
+def get_server_status(server_name, api_user=None):
+    """Get Server Status
+    ---
+    tags:
+      - Servers
+    security:
+      - Bearer: []
+      - Session: []
+    parameters:
+      - name: server_name
+        in: path
+        type: string
+        required: true
+        description: Name of the Minecraft server
+      - name: Authorization
+        in: header
+        type: string
+        description: Bearer token (optional if using session)
+    responses:
+      200:
+        description: Server status information
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [Running, Stopped]
+            players_online:
+              type: string
+              description: Number of players online or N/A
+            max_players:
+              type: string
+              description: Maximum players or N/A
+            ping:
+              type: string
+              description: Server ping or N/A
+            cpu_usage:
+              type: string
+              description: CPU usage or N/A
+            memory_usage:
+              type: string
+              description: Memory usage or N/A
+      401:
+        description: Authentication required
+      404:
+        description: Server not found
     """
     if is_server_running(server_name):
         return jsonify({
@@ -1746,9 +2515,8 @@ def get_server_status(server_name):
         })
 
 @app.route('/api/servers/<server_name>/console', methods=['GET', 'POST'])
-@login_required
-@require_permission('can_access_console')
-def handle_console(server_name):
+@api_require_permission('can_access_console')
+def handle_console(server_name, api_user=None):
     """
     Handles getting console output and sending commands via screen.
     """
@@ -1785,8 +2553,8 @@ def handle_console(server_name):
     })
 
 @app.route('/api/servers/<server_name>/log', methods=['GET'])
-@login_required
-def get_server_log(server_name):
+@api_auth_required
+def get_server_log(server_name, api_user=None):
     """Tails the server's latest.log file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     log_file_path = os.path.join(server_path, 'logs', 'latest.log')
@@ -1818,8 +2586,8 @@ def not_found_error(error):
 # --- Settings and File Browsing API ---
 
 @app.route('/api/settings', methods=['GET', 'POST'])
-@login_required
-def handle_settings():
+@api_auth_required
+def handle_settings(api_user=None):
     """Handles getting and saving application settings."""
     global SERVERS_DIR, config
     if request.method == 'POST':
@@ -1844,8 +2612,8 @@ def handle_settings():
     return jsonify(config)
 
 @app.route('/api/browse', methods=['GET'])
-@login_required
-def browse_files():
+@api_auth_required
+def browse_files(api_user=None):
     """An unrestricted file browser API to list directories."""
     req_path = request.args.get('path')
 
@@ -1905,8 +2673,8 @@ def get_jdk_url(version):
     return urls.get(str(version))
 
 @app.route('/api/servers/<server_name>/java/install', methods=['POST'])
-@login_required
-def install_java(server_name):
+@api_auth_required
+def install_java(server_name, api_user=None):
     """
     Downloads and extracts a specific JDK version for a server.
     The output is streamed to the installation log.
@@ -2004,9 +2772,8 @@ def install_java(server_name):
     return jsonify({"message": f"Java {java_version} installation started. Check Logs tab for output."})
 
 @app.route('/api/servers/<server_name>', methods=['DELETE'])
-@login_required
-@require_permission('can_delete')
-def delete_server(server_name):
+@api_require_permission('can_delete')
+def delete_server(server_name, api_user=None):
     """Deletes a server after stopping it."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -2146,8 +2913,8 @@ def stop_server(server_name):
         return {'error': f'Failed to stop server: {e}'}, 500
 
 @app.route('/api/servers/<server_name>/files/delete', methods=['POST'])
-@login_required
-def delete_files(server_name):
+@api_auth_required
+def delete_files(server_name, api_user=None):
     """Deletes a list of files and/or folders."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -2184,8 +2951,8 @@ def delete_files(server_name):
     return jsonify({"message": f"Successfully deleted {success_count} items."})
 
 @app.route('/api/servers/<server_name>/files/rename', methods=['POST'])
-@login_required
-def rename_file(server_name):
+@api_auth_required
+def rename_file(server_name, api_user=None):
     """Renames a file or folder."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -2218,8 +2985,8 @@ def rename_file(server_name):
         return jsonify({"error": f"Failed to rename: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/reapply-eula', methods=['POST'])
-@login_required
-def reapply_eula(server_name):
+@api_auth_required
+def reapply_eula(server_name, api_user=None):
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({'error': 'Server not found'}), 404
@@ -2233,8 +3000,8 @@ def reapply_eula(server_name):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/screens', methods=['GET'])
-@login_required
-def list_screens():
+@api_auth_required
+def list_screens(api_user=None):
     try:
         # We use 'S' instead of 's' in the command to get the full socket name
         result = subprocess.run(['screen', '-ls'], capture_output=True, text=True, check=True)
@@ -2257,8 +3024,8 @@ def list_screens():
         return jsonify({'error': f"Failed to list screens: {e.stderr}"}), 500
 
 @app.route('/api/screens/terminate-all', methods=['POST'])
-@login_required
-def terminate_all_screens():
+@api_auth_required
+def terminate_all_screens(api_user=None):
     try:
         # This command gracefully terminates all screen sessions
         subprocess.run(['pkill', 'screen'], check=True)
@@ -2271,9 +3038,37 @@ def terminate_all_screens():
             return jsonify({'message': 'No active screen sessions to terminate.'})
         return jsonify({'error': f"Failed to terminate screens: {e.stderr}"}), 500
 
+@app.route('/api/ui/config', methods=['GET'])
+def get_ui_config():
+    """Get public UI configuration (no auth required)
+    ---
+    tags:
+      - Settings
+    responses:
+      200:
+        description: UI configuration for frontend
+        schema:
+          type: object
+          properties:
+            panorama_intensity:
+              type: number
+              description: Intensity of panorama background effect
+    """
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+        # Return only non-sensitive UI config values
+        return jsonify({
+            'panorama_intensity': config.get('panorama_intensity', 1.5)
+        })
+    except FileNotFoundError:
+        return jsonify({'panorama_intensity': 1.5}), 200
+    except Exception as e:
+        return jsonify({'panorama_intensity': 1.5}), 200
+
 @app.route('/api/config', methods=['GET'])
-@login_required
-def get_config():
+@api_auth_required
+def get_config(api_user=None):
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
@@ -2284,8 +3079,8 @@ def get_config():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/config', methods=['POST'])
-@login_required
-def save_config_endpoint():
+@api_auth_required
+def save_config_endpoint(api_user=None):
     global SERVERS_DIR, CONFIGS_DIR
 
     old_config = config.copy()
@@ -2354,8 +3149,8 @@ def save_config_endpoint():
     return jsonify({'message': 'Settings saved successfully.'})
 
 @app.route('/api/minecraft/versions', methods=['GET'])
-@login_required
-def get_minecraft_versions():
+@api_auth_required
+def get_minecraft_versions(api_user=None):
     try:
         url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
         response = requests.get(url)
@@ -2371,8 +3166,8 @@ def get_minecraft_versions():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/loaders/<loader>/versions')
-@login_required
-def get_loader_versions(loader):
+@api_auth_required
+def get_loader_versions(loader, api_user=None):
     try:
         if loader == 'vanilla':
             url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
@@ -2409,8 +3204,8 @@ def get_loader_versions(loader):
         return jsonify({'error': f"Failed to fetch versions for {loader}: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/change-software', methods=['POST'])
-@login_required
-def change_server_software(server_name):
+@api_auth_required
+def change_server_software(server_name, api_user=None):
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({'error': 'Server not found'}), 404
@@ -2498,8 +3293,8 @@ def change_server_software(server_name):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/servers/<server_name>/files/upload', methods=['POST'])
-@login_required
-def upload_files(server_name):
+@api_auth_required
+def upload_files(server_name, api_user=None):
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
         return jsonify({"error": "Server not found"}), 404
@@ -2578,9 +3373,8 @@ def parse_properties(file_path):
     return properties
 
 @app.route('/api/servers/<server_name>/properties', methods=['GET'])
-@login_required
-@require_permission('can_view')
-def get_server_properties_endpoint(server_name):
+@api_require_permission('can_view')
+def get_server_properties_endpoint(server_name, api_user=None):
     """Gets the full server.properties file as a JSON object."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -2594,9 +3388,8 @@ def get_server_properties_endpoint(server_name):
     return jsonify(properties)
 
 @app.route('/api/servers/<server_name>/properties', methods=['POST'])
-@login_required
-@require_permission('can_edit_config')
-def save_server_properties_endpoint(server_name):
+@api_require_permission('can_edit_config')
+def save_server_properties_endpoint(server_name, api_user=None):
     """Updates the server.properties file from a JSON object."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -2751,13 +3544,13 @@ class BackupManager:
 backup_manager = BackupManager()
 
 @app.route('/api/servers/<server_name>/backups/settings', methods=['GET'])
-@login_required
-def get_backup_settings(server_name):
+@api_auth_required
+def get_backup_settings(server_name, api_user=None):
     return jsonify(backup_manager.get_server_backup_config(server_name))
 
 @app.route('/api/servers/<server_name>/backups/settings', methods=['POST'])
-@login_required
-def save_backup_settings(server_name):
+@api_auth_required
+def save_backup_settings(server_name, api_user=None):
     settings = request.get_json()
     if not settings:
         return jsonify({"error": "No settings provided"}), 400
@@ -2765,8 +3558,8 @@ def save_backup_settings(server_name):
     return jsonify({"message": "Backup settings saved successfully."})
 
 @app.route('/api/servers/<server_name>/backups/now', methods=['POST'])
-@login_required
-def trigger_backup_now(server_name):
+@api_auth_required
+def trigger_backup_now(server_name, api_user=None):
     """Triggers an immediate backup for a specific server."""
     try:
         # Run in a background thread to not block the request
@@ -2903,14 +3696,14 @@ class TaskManager:
 task_manager = TaskManager()
 
 @app.route('/api/servers/<server_name>/tasks', methods=['GET'])
-@login_required
-def get_tasks(server_name):
+@api_auth_required
+def get_tasks(server_name, api_user=None):
     tasks = task_manager.get_server_tasks(server_name)
     return jsonify(tasks)
 
 @app.route('/api/servers/<server_name>/tasks', methods=['POST'])
-@login_required
-def create_task(server_name):
+@api_auth_required
+def create_task(server_name, api_user=None):
     data = request.get_json()
     if not data or not all(k in data for k in ['name', 'cron', 'action']):
         return jsonify({"error": "Missing required task data"}), 400
@@ -2922,8 +3715,8 @@ def create_task(server_name):
     return jsonify(new_task), 201
 
 @app.route('/api/servers/<server_name>/tasks/<task_id>', methods=['PUT'])
-@login_required
-def update_task(server_name, task_id):
+@api_auth_required
+def update_task(server_name, task_id, api_user=None):
     data = request.get_json()
     if not data or not all(k in data for k in ['name', 'cron', 'action']):
         return jsonify({"error": "Missing required task data"}), 400
@@ -2939,8 +3732,8 @@ def update_task(server_name, task_id):
     return jsonify(updated_task)
 
 @app.route('/api/servers/<server_name>/tasks/<task_id>', methods=['DELETE'])
-@login_required
-def delete_task(server_name, task_id):
+@api_auth_required
+def delete_task(server_name, task_id, api_user=None):
     if task_manager.delete_task(server_name, task_id):
         return jsonify({"message": "Task deleted successfully"})
     else:
@@ -3036,8 +3829,8 @@ def get_uuid_from_username(username):
         return None
 
 @app.route('/api/servers/<server_name>/whitelist', methods=['GET'])
-@login_required
-def get_whitelist(server_name):
+@api_auth_required
+def get_whitelist(server_name, api_user=None):
     """Get the whitelist for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3047,8 +3840,8 @@ def get_whitelist(server_name):
     return jsonify(whitelist)
 
 @app.route('/api/servers/<server_name>/whitelist', methods=['POST'])
-@login_required
-def add_to_whitelist(server_name):
+@api_auth_required
+def add_to_whitelist(server_name, api_user=None):
     """Add a player to the whitelist."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3081,8 +3874,8 @@ def add_to_whitelist(server_name):
     return jsonify({"message": f"Player '{player_data['name']}' added to whitelist", "player": player_data}), 201
 
 @app.route('/api/servers/<server_name>/whitelist/<player_uuid>', methods=['DELETE'])
-@login_required
-def remove_from_whitelist(server_name, player_uuid):
+@api_auth_required
+def remove_from_whitelist(server_name, player_uuid, api_user=None):
     """Remove a player from the whitelist."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3099,8 +3892,8 @@ def remove_from_whitelist(server_name, player_uuid):
     return jsonify({"message": "Player removed from whitelist"}), 200
 
 @app.route('/api/servers/<server_name>/operators', methods=['GET'])
-@login_required
-def get_operators(server_name):
+@api_auth_required
+def get_operators(server_name, api_user=None):
     """Get the operators list for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3110,8 +3903,8 @@ def get_operators(server_name):
     return jsonify(ops)
 
 @app.route('/api/servers/<server_name>/operators', methods=['POST'])
-@login_required
-def add_operator(server_name):
+@api_auth_required
+def add_operator(server_name, api_user=None):
     """Add a player as operator."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3155,8 +3948,8 @@ def add_operator(server_name):
     return jsonify({"message": f"Player '{player_data['name']}' added as operator (level {level})", "operator": new_op}), 201
 
 @app.route('/api/servers/<server_name>/operators/<player_uuid>', methods=['DELETE'])
-@login_required
-def remove_operator(server_name, player_uuid):
+@api_auth_required
+def remove_operator(server_name, player_uuid, api_user=None):
     """Remove operator status from a player."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3288,8 +4081,8 @@ def parse_log_for_sessions(server_name):
         return analytics
 
 @app.route('/api/servers/<server_name>/analytics/refresh', methods=['POST'])
-@login_required
-def refresh_analytics(server_name):
+@api_auth_required
+def refresh_analytics(server_name, api_user=None):
     """Parse logs and update analytics data."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3302,8 +4095,8 @@ def refresh_analytics(server_name):
         return jsonify({"error": f"Failed to refresh analytics: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/analytics/playtime', methods=['GET'])
-@login_required
-def get_player_playtime(server_name):
+@api_auth_required
+def get_player_playtime(server_name, api_user=None):
     """Get player playtime statistics."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3328,8 +4121,8 @@ def get_player_playtime(server_name):
     return jsonify(playtime_list)
 
 @app.route('/api/servers/<server_name>/analytics/peak-hours', methods=['GET'])
-@login_required
-def get_peak_hours(server_name):
+@api_auth_required
+def get_peak_hours(server_name, api_user=None):
     """Get peak player hours statistics."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3361,8 +4154,8 @@ def get_peak_hours(server_name):
     return jsonify(hour_counts)
 
 @app.route('/api/servers/<server_name>/analytics/sessions', methods=['GET'])
-@login_required
-def get_recent_sessions(server_name):
+@api_auth_required
+def get_recent_sessions(server_name, api_user=None):
     """Get recent player sessions."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3389,8 +4182,8 @@ def get_recent_sessions(server_name):
     return jsonify(formatted_sessions)
 
 @app.route('/api/servers/<server_name>/analytics/online', methods=['GET'])
-@login_required
-def get_online_players(server_name):
+@api_auth_required
+def get_online_players(server_name, api_user=None):
     """Get currently online players by parsing the latest log."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3445,9 +4238,8 @@ def supports_plugins_or_mods(server_name):
     return server_type in ['paper', 'purpur', 'spigot', 'bukkit', 'fabric', 'forge', 'neoforge', 'quilt']
 
 @app.route('/api/servers/<server_name>/plugins', methods=['GET'])
-@login_required
-@require_permission('can_manage_plugins', 'server_name')
-def list_plugins(server_name):
+@api_require_permission('can_manage_plugins', 'server_name')
+def list_plugins(server_name, api_user=None):
     """Lists all installed plugins/mods for a server."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3476,9 +4268,8 @@ def list_plugins(server_name):
     return jsonify(plugins)
 
 @app.route('/api/servers/<server_name>/plugins/search', methods=['GET'])
-@login_required
-@require_permission('can_manage_plugins', 'server_name')
-def search_plugins(server_name):
+@api_require_permission('can_manage_plugins', 'server_name')
+def search_plugins(server_name, api_user=None):
     """Search for plugins/mods from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3539,9 +4330,8 @@ def search_plugins(server_name):
         return jsonify({"error": f"An error occurred: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/plugins/install', methods=['POST'])
-@login_required
-@require_permission('can_manage_plugins', 'server_name')
-def install_plugin(server_name):
+@api_require_permission('can_manage_plugins', 'server_name')
+def install_plugin(server_name, api_user=None):
     """Install a plugin/mod from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3625,9 +4415,8 @@ def install_plugin(server_name):
         return jsonify({"error": f"An error occurred: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/plugins/<path:filename>', methods=['DELETE'])
-@login_required
-@require_permission('can_manage_plugins', 'server_name')
-def delete_plugin(server_name, filename):
+@api_require_permission('can_manage_plugins', 'server_name')
+def delete_plugin(server_name, filename, api_user=None):
     """Delete a plugin/mod file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3656,9 +4445,8 @@ def delete_plugin(server_name, filename):
         return jsonify({"error": f"Failed to delete plugin: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/plugins/info/<project_id>', methods=['GET'])
-@login_required
-@require_permission('can_manage_plugins', 'server_name')
-def get_plugin_info(server_name, project_id):
+@api_require_permission('can_manage_plugins', 'server_name')
+def get_plugin_info(server_name, project_id, api_user=None):
     """Get detailed information about a plugin from Modrinth."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3693,8 +4481,8 @@ def get_plugin_info(server_name, project_id):
         return jsonify({"error": f"Failed to fetch plugin info: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/supports-plugins', methods=['GET'])
-@login_required
-def check_plugin_support(server_name):
+@api_auth_required
+def check_plugin_support(server_name, api_user=None):
     """Check if the server supports plugins/mods."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3760,8 +4548,8 @@ def get_world_folders(server_path):
     return worlds
 
 @app.route('/api/servers/<server_name>/worlds', methods=['GET'])
-@login_required
-def list_worlds(server_name):
+@api_auth_required
+def list_worlds(server_name, api_user=None):
     """List all world folders in the server directory."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3774,8 +4562,8 @@ def list_worlds(server_name):
         return jsonify({"error": f"Failed to list worlds: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/worlds/<world_name>/download', methods=['GET'])
-@login_required
-def download_world(server_name, world_name):
+@api_auth_required
+def download_world(server_name, world_name, api_user=None):
     """Download a world folder as a ZIP file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3829,8 +4617,8 @@ def download_world(server_name, world_name):
         return jsonify({"error": f"Failed to create world download: {e}"}), 500
 
 @app.route('/api/servers/<server_name>/worlds/upload', methods=['POST'])
-@login_required
-def upload_world(server_name):
+@api_auth_required
+def upload_world(server_name, api_user=None):
     """Upload and extract a world ZIP file."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -3927,8 +4715,8 @@ def upload_world(server_name):
                 pass
 
 @app.route('/api/servers/<server_name>/worlds/<world_name>/dimension/<dimension>', methods=['DELETE'])
-@login_required
-def reset_dimension(server_name, world_name, dimension):
+@api_auth_required
+def reset_dimension(server_name, world_name, dimension, api_user=None):
     """Reset a world dimension (Nether or End)."""
     server_path = os.path.join(SERVERS_DIR, server_name)
     if not os.path.isdir(server_path):
@@ -4007,8 +4795,8 @@ def ensure_templates_dir():
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 @app.route('/api/templates', methods=['GET'])
-@login_required
-def list_templates():
+@api_auth_required
+def list_templates(api_user=None):
     """List all saved server templates."""
     ensure_templates_dir()
     
@@ -4037,8 +4825,8 @@ def list_templates():
         return jsonify({"error": f"Failed to list templates: {e}"}), 500
 
 @app.route('/api/templates', methods=['POST'])
-@login_required
-def create_template():
+@api_auth_required
+def create_template(api_user=None):
     """Create a template from an existing server with selective content inclusion."""
     data = request.get_json()
     server_name = data.get('server_name')
@@ -4170,8 +4958,8 @@ def create_template():
         return jsonify({"error": f"Failed to create template: {e}"}), 500
 
 @app.route('/api/templates/<template_id>', methods=['GET'])
-@login_required
-def get_template(template_id):
+@api_auth_required
+def get_template(template_id, api_user=None):
     """Get a specific template."""
     ensure_templates_dir()
     
@@ -4190,8 +4978,8 @@ def get_template(template_id):
         return jsonify({"error": f"Failed to load template: {e}"}), 500
 
 @app.route('/api/templates/<template_id>', methods=['DELETE'])
-@login_required
-def delete_template(template_id):
+@api_auth_required
+def delete_template(template_id, api_user=None):
     """Delete a template and its associated data."""
     ensure_templates_dir()
     
@@ -4216,8 +5004,8 @@ def delete_template(template_id):
         return jsonify({"error": f"Failed to delete template: {e}"}), 500
 
 @app.route('/api/templates/<template_id>/export', methods=['GET'])
-@login_required
-def export_template(template_id):
+@api_auth_required
+def export_template(template_id, api_user=None):
     """Export a template as downloadable JSON."""
     ensure_templates_dir()
     
@@ -4239,8 +5027,8 @@ def export_template(template_id):
         return jsonify({"error": f"Failed to export template: {e}"}), 500
 
 @app.route('/api/templates/import', methods=['POST'])
-@login_required
-def import_template():
+@api_auth_required
+def import_template(api_user=None):
     """Import a template from uploaded JSON file."""
     ensure_templates_dir()
     
@@ -4292,8 +5080,8 @@ def import_template():
         return jsonify({"error": f"Failed to import template: {e}"}), 500
 
 @app.route('/api/servers/create-from-template', methods=['POST'])
-@login_required
-def create_server_from_template():
+@api_auth_required
+def create_server_from_template(api_user=None):
     """Create a new server from a template with all included content."""
     data = request.get_json()
     template_id = data.get('template_id')

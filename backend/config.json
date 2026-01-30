@@ -8,6 +8,8 @@
     "debug": false,
     "secret_key": "a9dc9bee4a47947d4aa919933feb721fa8770a1827f4450e80c5922ccdc6ad4a",
     "multi_user_mode": true,
+    "oauth2_enabled": true,
+    "oauth2_token_expiry": 3600,
     "default_permissions": {
         "can_view_logs": false,
         "can_view_analytics": false,

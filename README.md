@@ -50,6 +50,103 @@ Stop memorizing commands and start managing your servers visually.
 | 📈 **Server Analytics**      | Track player activity, session history, playtime statistics, and peak hours. Monitor server performance and player engagement over time.   |
 | ⚙️ **Effortless Configuration**| Manage server ports, EULA, and other settings through the UI. Includes automatic port-conflict detection to prevent headaches.        |
 | 🎨 **Modern & Responsive UI** | A clean, dark-themed interface built with Bootstrap and SweetAlert2 makes managing servers a pleasure on any device.                      |
+| 🔑 **REST API with OAuth2**    | Full REST API with OAuth2 authentication and interactive Swagger documentation. Automate server management, integrate with CI/CD pipelines, or build custom tools with programmatic access. |
+
+<br/>
+
+## 🔌 REST API & OAuth2 Authentication
+
+MineServerGUI provides a comprehensive REST API with OAuth2 client credentials authentication, allowing you to programmatically manage your servers.
+
+### Creating an OAuth2 Client
+
+1. Log in to the dashboard and click the **Settings** button (gear icon)
+2. Navigate to the **OAuth2 Clients** tab
+3. Click **Create OAuth2 Client** and give it a descriptive name
+4. **Save the credentials immediately** - the client secret is shown only once!
+
+### Obtaining an Access Token
+
+```bash
+curl -X POST http://localhost:5000/oauth2/token \ -d "client_id=your-client-id" \ -d "client_secret=your-client-secret" \ -d "grant_type=client_credentials"
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+### Using the API
+
+Include the access token in the `Authorization` header for all API requests:
+
+```bash
+# List all servers
+curl http://localhost:5000/api/servers \
+  -H "Authorization: Bearer <your_access_token>"
+
+# Get server details
+curl http://localhost:5000/api/servers/myserver \
+  -H "Authorization: Bearer <your_access_token>"
+
+# Start a server
+curl -X POST http://localhost:5000/api/servers/myserver/start \
+  -H "Authorization: Bearer <your_access_token>"
+
+# Stop a server
+curl -X POST http://localhost:5000/api/servers/myserver/stop \
+  -H "Authorization: Bearer <your_access_token>"
+
+# Send a console command
+curl -X POST http://localhost:5000/api/servers/myserver/console \
+  -H "Authorization: Bearer <your_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"command": "say Hello from API!"}'
+
+# Get console logs
+curl http://localhost:5000/api/servers/myserver/console \
+  -H "Authorization: Bearer <your_access_token>"
+
+# Get server status
+curl http://localhost:5000/api/servers/myserver/status \
+  -H "Authorization: Bearer <your_access_token>"
+```
+
+### Available API Endpoints
+
+The API supports all operations available in the web interface:
+
+- **Server Management**: Create, start, stop, restart, delete servers
+- **Console Access**: Send commands and retrieve logs
+- **File Management**: Upload, download, edit server files
+- **Properties**: Edit server.properties
+- **Backups**: Create and restore backups
+- **Worlds**: Upload, download, and manage world folders
+- **Plugins**: Search, install, and remove plugins/mods
+- **Analytics**: Player statistics and session history
+- **User Management**: Manage users, groups, and permissions (admin only)
+
+### Authentication & Permissions
+
+- OAuth2 clients **inherit all permissions** from the user account that created them
+- Admin accounts have full access to all endpoints
+- Regular user accounts have server-specific permissions configured by administrators
+- Access tokens expire after 1 hour (configurable in `backend/config.json`)
+
+### Configuration
+
+OAuth2 settings can be configured in `backend/config.json`:
+
+```json
+{
+  "oauth2_enabled": true,
+  "oauth2_token_expiry": 3600
+}
+```
 
 <br/>
 
@@ -84,7 +181,7 @@ Ready to take control? Follow these simple steps to get MineServerGUI up and run
     Create an admin account with a username and password (minimum 6 characters).
     After setup, login with your credentials to access the dashboard.
 
-### Installation & Launch
+### ⬇️Installation & Launch
 
 1.  **Clone the Repository:**
     ```bash

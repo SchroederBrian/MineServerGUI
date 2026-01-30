@@ -1,6 +1,10 @@
 Flask
 Flask-Cors
 Flask-Login
+flask-restx
+flasgger
+authlib
+python-jose[cryptography]
 psutil
 requests
 APScheduler 

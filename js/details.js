@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', async function () {
-    const API_URL = 'http://127.0.0.1:5000';
+    const API_URL = window.location.origin;
     const params = new URLSearchParams(window.location.search);
     const serverId = params.get('id');
 
@@ -199,7 +199,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (!panorama) return;
 
         try {
-            const response = await authenticatedFetch(`${API_URL}/api/config`);
+            const response = await fetch(`${API_URL}/api/ui/config`);
             const config = await response.json();
             const intensity = config.panorama_intensity || 1.5;
             

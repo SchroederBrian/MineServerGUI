@@ -1,6 +1,6 @@
 // Admin Panel Logic for User and Group Management
 (function() {
-    const API_URL = 'http://127.0.0.1:5000';
+    const API_URL = window.location.origin;
     
     let isAdmin = false;
     let currentGroupId = null;

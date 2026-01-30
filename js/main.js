@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
     const serverListElement = document.getElementById('serverList');
     const createServerBtn = document.getElementById('createServerBtn');
-    const API_URL = 'http://127.0.0.1:5000';
+    const API_URL = window.location.origin;
 
     // --- Authentication Check ---
     let currentUser = null;
@@ -37,9 +37,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const createCard = createServerBtn?.closest('.card');
                 if (createCard) createCard.style.display = 'none';
                 
-                // Hide global Settings button (only admins can change app settings)
-                const settingsBtn = document.getElementById('settingsBtn');
-                if (settingsBtn) settingsBtn.style.display = 'none';
+                // Configure settings modal for non-admins
+                // Hide General Settings tab (admin-only), show OAuth2 tab
+                const generalTab = document.getElementById('general-settings-tab');
+                const generalContent = document.getElementById('general-settings');
+                if (generalTab) generalTab.parentElement.style.display = 'none';
+                if (generalContent) {
+                    generalContent.classList.remove('show', 'active');
+                }
+                
+                // Make OAuth2 tab active by default for non-admins
+                const oauthTab = document.getElementById('oauth-settings-tab');
+                const oauthContent = document.getElementById('oauth-settings');
+                if (oauthTab) oauthTab.classList.add('active');
+                if (oauthContent) {
+                    oauthContent.classList.add('show', 'active');
+                }
             }
             
             return true;
@@ -60,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!panorama) return;
 
         try {
-            const response = await fetch(`${API_URL}/api/config`, {
+            const response = await fetch(`${API_URL}/api/ui/config`, {
                 credentials: 'include'
             });
             const config = await response.json();
