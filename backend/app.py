@@ -88,14 +88,27 @@ swagger = Swagger(app, config=swagger_config, template=swagger_template)
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
 def _default_servers_dir():
-    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers'))
+    # Keep default writable even if project root is not (common with systemd + git clone as root).
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mc_servers'))
 
 def _default_configs_dir():
     return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs'))
 
+def _default_data_dir():
+    # Used as a safe fallback if configured paths are not writable.
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
+
 def _looks_like_windows_path(path_value: str) -> bool:
     # Examples: "C:\\Users\\...", "D:/data/..."
     return bool(re.match(r'^[a-zA-Z]:[\\/]', path_value))
+
+def _ensure_dir_exists(path_value: str, key_name: str) -> bool:
+    try:
+        os.makedirs(path_value, exist_ok=True)
+        return True
+    except Exception as e:
+        print(f"[config] Failed to create '{key_name}' directory '{path_value}': {e}")
+        return False
 
 def _sanitize_dir_path(raw_value, default_value: str, key_name: str) -> str:
     """
@@ -119,13 +132,34 @@ def _sanitize_dir_path(raw_value, default_value: str, key_name: str) -> str:
 
     candidate = os.path.abspath(candidate)
 
-    try:
-        os.makedirs(candidate, exist_ok=True)
-    except Exception as e:
-        print(f"[config] Failed to create '{key_name}' directory '{candidate}': {e}. Falling back to default.")
-        candidate = os.path.abspath(default_value)
-        os.makedirs(candidate, exist_ok=True)
+    # 1) Try configured (or default) value
+    if _ensure_dir_exists(candidate, key_name):
+        return candidate
 
+    # 2) Try the default value explicitly (may differ from candidate after sanitization)
+    fallback_default = os.path.abspath(default_value)
+    if fallback_default != candidate and _ensure_dir_exists(fallback_default, key_name):
+        return fallback_default
+
+    # 3) Try a backend-local data dir (should be writable if backend dir is writable)
+    backend_data_root = _default_data_dir()
+    backend_fallback = os.path.join(backend_data_root, key_name)
+    if _ensure_dir_exists(backend_fallback, key_name):
+        return backend_fallback
+
+    # 4) Try user home (works well for systemd user services)
+    home_dir = os.path.expanduser('~')
+    if home_dir and home_dir != '~':
+        home_fallback = os.path.join(home_dir, '.mineservergui', key_name)
+        if _ensure_dir_exists(home_fallback, key_name):
+            return home_fallback
+
+    # 5) Last resort: /tmp (should nearly always be writable on Linux)
+    tmp_fallback = os.path.join('/tmp', 'mineservergui', key_name)
+    if _ensure_dir_exists(tmp_fallback, key_name):
+        return tmp_fallback
+
+    # If everything failed, return the candidate anyway (but do not crash at import time).
     return candidate
 
 def load_config():
