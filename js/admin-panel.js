@@ -1,6 +1,6 @@
 // Admin Panel Logic for User and Group Management
 (function() {
-    const API_URL = window.location.origin;
+    const API_URL = window.MineServerGUI?.getApiBaseUrl?.() || window.location.origin;
     
     let isAdmin = false;
     let currentGroupId = null;

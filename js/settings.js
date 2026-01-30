@@ -1,4 +1,4 @@
-const API_URL = window.location.origin;
+const API_URL = window.MineServerGUI?.getApiBaseUrl?.() || window.location.origin;
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Fetch Wrapper with Credentials ---

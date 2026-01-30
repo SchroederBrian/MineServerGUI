@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', async function () {
-    const API_URL = window.location.origin;
+    const API_URL = window.MineServerGUI?.getApiBaseUrl?.() || window.location.origin;
     const params = new URLSearchParams(window.location.search);
     const serverId = params.get('id');
 

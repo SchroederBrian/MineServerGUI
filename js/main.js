@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
     const serverListElement = document.getElementById('serverList');
     const createServerBtn = document.getElementById('createServerBtn');
-    const API_URL = window.location.origin;
+    const API_URL = window.MineServerGUI?.getApiBaseUrl?.() || window.location.origin;
 
     // --- Authentication Check ---
     let currentUser = null;
