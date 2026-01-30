@@ -87,13 +87,54 @@ swagger = Swagger(app, config=swagger_config, template=swagger_template)
 # --- Configuration Loading ---
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
+def _default_servers_dir():
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers'))
+
+def _default_configs_dir():
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs'))
+
+def _looks_like_windows_path(path_value: str) -> bool:
+    # Examples: "C:\\Users\\...", "D:/data/..."
+    return bool(re.match(r'^[a-zA-Z]:[\\/]', path_value))
+
+def _sanitize_dir_path(raw_value, default_value: str, key_name: str) -> str:
+    """
+    Ensures directory config values are usable on the current OS.
+    - Normalizes to absolute paths.
+    - Creates directories if they do not exist.
+    - Falls back to defaults if path is clearly invalid or not creatable.
+    """
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        raw_value = default_value
+
+    candidate = raw_value.strip()
+
+    # If we are not on Windows, reject obvious Windows drive-letter paths.
+    if os.name != 'nt' and _looks_like_windows_path(candidate):
+        candidate = default_value
+
+    # If we are not on WSL and a WSL-mount path is configured but unavailable, fallback.
+    if os.name != 'nt' and candidate.startswith('/mnt/') and not os.path.exists('/mnt'):
+        candidate = default_value
+
+    candidate = os.path.abspath(candidate)
+
+    try:
+        os.makedirs(candidate, exist_ok=True)
+    except Exception as e:
+        print(f"[config] Failed to create '{key_name}' directory '{candidate}': {e}. Falling back to default.")
+        candidate = os.path.abspath(default_value)
+        os.makedirs(candidate, exist_ok=True)
+
+    return candidate
+
 def load_config():
     """Loads the configuration from config.json."""
     if not os.path.exists(CONFIG_FILE):
         # Create a default config if it doesn't exist
         default_config = {
-            'servers_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers'),
-            'configs_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+            'servers_dir': _default_servers_dir(),
+            'configs_dir': _default_configs_dir()
         }
         save_config(default_config)
         return default_config
@@ -102,16 +143,29 @@ def load_config():
             # Add default for configs_dir if it's missing for backward compatibility
             config_data = json.load(f)
             if 'configs_dir' not in config_data:
-                config_data['configs_dir'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+                config_data['configs_dir'] = _default_configs_dir()
             if 'panorama_intensity' not in config_data:
                 config_data['panorama_intensity'] = 1.5
+
+            # Sanitize paths (prevents Linux deployments from inheriting Windows/WSL paths)
+            original_servers_dir = config_data.get('servers_dir')
+            original_configs_dir = config_data.get('configs_dir')
+            config_data['servers_dir'] = _sanitize_dir_path(original_servers_dir, _default_servers_dir(), 'servers_dir')
+            config_data['configs_dir'] = _sanitize_dir_path(original_configs_dir, _default_configs_dir(), 'configs_dir')
+
+            if config_data.get('servers_dir') != original_servers_dir or config_data.get('configs_dir') != original_configs_dir:
+                save_config(config_data)
+
             return config_data
     except (json.JSONDecodeError, IOError) as e:
         print(f"Error reading config file {CONFIG_FILE}: {e}. Using default.")
-        return {
-            'servers_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mc_servers'),
-            'configs_dir': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_configs')
+        default_config = {
+            'servers_dir': _sanitize_dir_path(_default_servers_dir(), _default_servers_dir(), 'servers_dir'),
+            'configs_dir': _sanitize_dir_path(_default_configs_dir(), _default_configs_dir(), 'configs_dir'),
+            'panorama_intensity': 1.5,
         }
+        save_config(default_config)
+        return default_config
 
 def save_config(config_data):
     """Saves the configuration to config.json."""
@@ -948,6 +1002,8 @@ def get_server_properties(server_path):
 
 def is_port_in_use(port_to_check, exclude_server_name=None):
     """Checks if a port is already used by another server."""
+    if not os.path.isdir(SERVERS_DIR):
+        return False
     for server_name in os.listdir(SERVERS_DIR):
         if server_name == exclude_server_name:
             continue
@@ -2047,6 +2103,12 @@ def handle_servers(api_user=None):
         if not eula_accepted:
             return jsonify({'error': 'EULA must be accepted'}), 400
         
+        # Ensure servers directory exists (and fail with JSON if not possible)
+        try:
+            os.makedirs(SERVERS_DIR, exist_ok=True)
+        except Exception as e:
+            return jsonify({'error': f"Servers directory is not accessible: {e}"}), 500
+
         if is_port_in_use(port):
             return jsonify({"error": f"Port {port} is already in use."}), 409
         
